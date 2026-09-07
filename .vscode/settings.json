@@ -1,0 +1,9 @@
+{
+    // Use the project's virtual environment for IntelliSense (Pylance)
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+    "python.terminal.activateEnvironment": true,
+    // Let Pylance resolve the local module import "from image_processor import process_image"
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}\\image-service"
+    ]
+}

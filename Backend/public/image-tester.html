@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Image Pipeline Tester</title>
+<style>
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #f4f6f8; margin: 0; padding: 24px; color: #1e293b; }
+  .card { background: #fff; border-radius: 10px; padding: 20px; max-width: 960px; margin: 0 auto 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .grid { display: flex; gap: 20px; flex-wrap: wrap; }
+  .pane { flex: 1; min-width: 280px; text-align: center; }
+  .pane h3 { margin: 8px 0; font-size: 15px; }
+  .imgbox { border: 1px dashed #cbd5e1; border-radius: 8px; min-height: 240px; display: flex; align-items: center; justify-content: center;
+            background: repeating-conic-gradient(#e9edf1 0% 25%, #ffffff 0% 50%) 50% / 24px 24px; overflow: hidden; }
+  .imgbox img { max-width: 100%; max-height: 420px; }
+  input[type=file] { margin: 12px 0; }
+  button { background: #2563eb; color: #fff; border: 0; padding: 10px 18px; border-radius: 8px; font-size: 15px; cursor: pointer; }
+  button:disabled { background: #9db4e8; cursor: wait; }
+  .status { font-size: 14px; color: #475569; }
+  .err { color: #dc2626; }
+  a.dl { display: inline-block; margin-top: 10px; color: #2563eb; text-decoration: none; border: 1px solid #bfdbfe; padding: 6px 14px; border-radius: 8px; }
+  code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🧪 Image pipeline tester</h1>
+  <p class="status">Pick an image (jpg / png / webp, max 5&nbsp;MB) — it travels:
+    <code>this page → NestJS :3000 → Python :8000 → back</code></p>
+  <input type="file" id="file" accept="image/jpeg,image/png,image/webp" />
+  <button id="go" disabled>Remove background ✨</button>
+  <p id="status" class="status">No image selected yet.</p>
+</div>
+
+<div class="card">
+  <div class="grid">
+    <div class="pane">
+      <h3>Original</h3>
+      <div class="imgbox" id="origBox"><span class="status">no image yet</span></div>
+    </div>
+    <div class="pane">
+      <h3>Processed (background removed)</h3>
+      <div class="imgbox" id="outBox"><span class="status">no image yet</span></div>
+      <div id="dl"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('file');
+  const go = document.getElementById('go');
+  const statusEl = document.getElementById('status');
+  const origBox = document.getElementById('origBox');
+  const outBox = document.getElementById('outBox');
+  const dl = document.getElementById('dl');
+  let file = null;
+
+  fileInput.addEventListener('change', () => {
+    file = fileInput.files[0] || null;
+    go.disabled = !file;
+    if (!file) {
+      statusEl.textContent = 'No image selected yet.';
+      origBox.innerHTML = '<span class="status">no image yet</span>';
+      return;
+    }
+    statusEl.textContent = 'Selected: ' + file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+    origBox.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(file);
+    origBox.appendChild(img);
+  });
+
+  go.addEventListener('click', async () => {
+    if (!file) return;
+    go.disabled = true;
+    statusEl.className = 'status';
+    statusEl.textContent = 'Processing… (NestJS → Python → back)';
+    outBox.innerHTML = '<span class="status">working…</span>';
+    dl.innerHTML = '';
+    const t0 = performance.now();
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const res = await fetch('/api/image-processing/remove-background', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(res.status + ' ' + res.statusText + ' — ' + text);
+      }
+      const data = await res.json();
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      outBox.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = data.url;
+      outBox.appendChild(img);
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      dl.innerHTML = '<a class="dl" href="' + data.url + '" download="processed_' + baseName + '.png">⬇ Download processed PNG</a>';
+      statusEl.textContent = '✅ Done in ' + secs + 's — background removed.';
+    } catch (e) {
+      statusEl.className = 'status err';
+      statusEl.textContent = '❌ ' + e.message;
+      outBox.innerHTML = '<span class="status err">failed</span>';
+    } finally {
+      go.disabled = false;
+    }
+  });
+</script>
+
+</body>
+</html>
