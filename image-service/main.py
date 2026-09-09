@@ -6,7 +6,7 @@ from image_processor import process_image
 
 app = FastAPI()
 
-
+print("in main")
 @app.get("/")
 def root():
     return {

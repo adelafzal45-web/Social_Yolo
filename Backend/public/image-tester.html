@@ -29,8 +29,15 @@
   <h1>🧪 Image pipeline tester</h1>
   <p class="status">Pick an image (jpg / png / webp, max 5&nbsp;MB) — it travels:
     <code>this page → NestJS :3000 → Python :8000 → back</code></p>
+  <p class="status">Server: <span id="srv" class="status">checking…</span></p>
+  <div id="fileWarn" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; padding:10px 14px; margin:10px 0;">
+    ⚠️ You opened this file directly from disk (<code>file://</code>), so the API calls can't work.
+    Open it via the server instead:
+    <a href="http://localhost:3000/image-tester.html">http://localhost:3000/image-tester.html</a>
+  </div>
   <input type="file" id="file" accept="image/jpeg,image/png,image/webp" />
   <button id="go" disabled>Remove background ✨</button>
+  <button id="hc" style="background:#64748b;">Run health check</button>
   <p id="status" class="status">No image selected yet.</p>
 </div>
 
