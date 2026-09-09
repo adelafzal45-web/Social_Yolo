@@ -27,3 +27,11 @@ async def process_image_endpoint(
         content=processed_image,
         media_type="image/png"
     )
+
+
+# Allows starting the server directly with:  python main.py
+# (equivalent to: uvicorn main:app --host 0.0.0.0 --port 8000)
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
