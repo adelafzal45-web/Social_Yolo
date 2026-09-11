@@ -9,6 +9,18 @@ import {
   IMAGE_SERVICE_TIMEOUT_MS,
 } from '../config/image-service.config';
 
+/** Result of the background-removal pipeline. */
+export interface ProcessedImageResult {
+  /** PNG bytes from Python, or the original bytes when it fell back. */
+  buffer: Buffer;
+  /**
+   * True when the Python service actually removed the background.
+   * False means the caller got the original bytes (service down/error)
+   * or background removal was skipped.
+   */
+  backgroundRemoved: boolean;
+}
+
 @Injectable()
 export class ImageProcessingService {
   private readonly logger = new Logger(ImageProcessingService.name);
@@ -25,6 +37,15 @@ export class ImageProcessingService {
    * @returns Processed PNG bytes from Python, or the original bytes as a fallback.
    */
   async processImage(file: UploadedFile): Promise<Buffer> {
+    return (await this.processImageWithStatus(file)).buffer;
+  }
+
+  /**
+   * Same as `processImage`, but also reports whether the background was
+   * actually removed — callers use this to keep prompts truthful when the
+   * Python service falls back to the original image.
+   */
+  async processImageWithStatus(file: UploadedFile): Promise<ProcessedImageResult> {
     const originalBytes = await readFileBuffer(file);
 
     try {
@@ -47,17 +68,17 @@ export class ImageProcessingService {
           `Image service responded ${response.status}: ${text || response.statusText}. ` +
             'Falling back to original image.',
         );
-        return originalBytes;
+        return { buffer: originalBytes, backgroundRemoved: false };
       }
 
       const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
+      return { buffer: Buffer.from(arrayBuffer), backgroundRemoved: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
         `Image service unavailable (${message}). Falling back to original image.`,
       );
-      return originalBytes;
+      return { buffer: originalBytes, backgroundRemoved: false };
     }
   }
 

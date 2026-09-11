@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Post Generator Tester</title>
+<style>
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #f4f6f8; margin: 0; padding: 24px; color: #1e293b; }
+  .card { background: #fff; border-radius: 10px; padding: 20px; max-width: 960px; margin: 0 auto 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 6px; }
+  .grid { display: flex; gap: 20px; flex-wrap: wrap; }
+  .pane { flex: 1; min-width: 280px; text-align: center; }
+  .pane h3 { margin: 8px 0; font-size: 15px; }
+  .imgbox { border: 1px dashed #cbd5e1; border-radius: 8px; min-height: 240px; display: flex; align-items: center; justify-content: center;
+            background: repeating-conic-gradient(#e9edf1 0% 25%, #ffffff 0% 50%) 50% / 24px 24px; overflow: hidden; }
+  .imgbox img { max-width: 100%; max-height: 420px; }
+  input[type=file] { margin: 12px 0; }
+  input[type=text] { padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box; }
+  .row { display: flex; gap: 10px; margin: 10px 0; }
+  .row > input { flex: 1; }
+  .row > label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #475569; white-space: nowrap; }
+  .row > label input { width: 150px; }
+  button { background: #2563eb; color: #fff; border: 0; padding: 10px 18px; border-radius: 8px; font-size: 15px; cursor: pointer; }
+  button:disabled { background: #9db4e8; cursor: wait; }
+  button.ghost { background: #64748b; }
+  .status { font-size: 14px; color: #475569; }
+  .err { color: #dc2626; }
+  a.dl { display: inline-block; margin-top: 10px; color: #2563eb; text-decoration: none; border: 1px solid #bfdbfe; padding: 6px 14px; border-radius: 8px; }
+  code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; }
+  pre { white-space: pre-wrap; font-size: 12px; background: #f1f5f9; padding: 10px; border-radius: 8px; max-height: 320px; overflow: auto; text-align: left; }
+  .post { display: flex; gap: 14px; align-items: center; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin: 8px 0; }
+  .post img { width: 84px; height: 84px; object-fit: cover; border-radius: 6px; background: #eef2f6; }
+  .post .meta { flex: 1; font-size: 13px; }
+  .post .meta b { font-size: 14px; }
+  .stars { display: flex; gap: 2px; }
+  .stars button { background: #f1f5f9; color: #f59e0b; padding: 3px 7px; font-size: 15px; border-radius: 6px; }
+  .stars button.on { background: #fef3c7; }
+  .stars button:hover { background: #e2e8f0; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🎨 AI Post Generator tester</h1>
+  <p class="status">Type a short prompt (+ optional subject image) — it travels:
+    <code>this page → NestJS :3000 → bg-removal :8000 → RAG → Gemini</code></p>
+  <p class="status">Backend: <span id="srv">checking…</span> · Python service: <span id="pysrv">checking…</span></p>
+  <div id="fileWarn" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; padding:10px 14px; margin:10px 0;">
+    ⚠️ You opened this file directly from disk (<code>file://</code>), so the API calls can't work.
+    Open it via the server instead:
+    <a href="http://localhost:3000/post-tester.html">http://localhost:3000/post-tester.html</a>
+  </div>
+  <div class="row">
+    <input type="text" id="prompt" placeholder="e.g. Eid sale post with 50% discount" maxlength="300" />
+  </div>
+  <div class="row">
+    <label>Your user id <input type="text" id="userId" placeholder="e.g. test-user-1" /></label>
+  </div>
+  <input type="file" id="file" accept="image/jpeg,image/png,image/webp" />
+  <div class="row">
+    <button id="go" disabled>Generate post ✨</button>
+    <button id="refresh" class="ghost">Refresh recent posts</button>
+  </div>
+  <p id="status" class="status">Type a prompt to begin (image optional).</p>
+</div>
+
+<div class="card" id="resultCard" style="display:none;">
+  <div class="grid">
+    <div class="pane">
+      <h3>Generated post</h3>
+      <div class="imgbox" id="outBox"><span class="status">no post yet</span></div>
+      <div id="dl"></div>
+    </div>
+    <div class="pane">
+      <h3>Final prompt sent to Gemini</h3>
+      <pre id="finalPrompt">—</pre>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>🗓 Recent posts — rate to teach the system</h2>
+  <p class="status">⭐ 4–5 adds the post to your personal RAG style pool · 1–3 removes it.</p>
+  <div id="posts"><span class="status">loading…</span></div>
+</div>
+
+<script>
+  const promptInput = document.getElementById('prompt');
+  const fileInput = document.getElementById('file');
+  const userIdInput = document.getElementById('userId');
+  const go = document.getElementById('go');
+  const refresh = document.getElementById('refresh');
+  const statusEl = document.getElementById('status');
+  const outBox = document.getElementById('outBox');
+  const dl = document.getElementById('dl');
+  const finalPromptEl = document.getElementById('finalPrompt');
+  const resultCard = document.getElementById('resultCard');
+  const postsEl = document.getElementById('posts');
+  let file = null;
+
+  if (location.protocol === 'file:') {
+    document.getElementById('fileWarn').style.display = 'block';
+  }
+
+  function userHeaders() {
+    const uid = userIdInput.value.trim();
+    const h = {};
+    if (uid) h['x-user-id'] = uid;
+    return h;
+  }
+
+  function updateGoState() {
+    go.disabled = promptInput.value.trim().length === 0;
+  }
+  promptInput.addEventListener('input', updateGoState);
+
+  fileInput.addEventListener('change', () => {
+    file = fileInput.files[0] || null;
+    statusEl.className = 'status';
+    statusEl.textContent = file
+      ? 'Subject image: ' + file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)'
+      : 'Image cleared — will generate without a subject.';
+  });
+
+  async function checkHealth() {
+    const srv = document.getElementById('srv');
+    const pysrv = document.getElementById('pysrv');
+    try {
+      const res = await fetch('/api/image-processing/health');
+      const data = await res.json();
+      srv.textContent = 'up ✅';
+      pysrv.textContent = data.available ? 'up ✅' : 'down ❌ (start image-service first)';
+    } catch (e) {
+      srv.textContent = 'down ❌';
+      pysrv.textContent = '?';
+    }
+  }
+
+  go.addEventListener('click', async () => {
+    const prompt = promptInput.value.trim();
+    if (!prompt) return;
+    go.disabled = true;
+    statusEl.className = 'status';
+    statusEl.textContent = 'Generating… (bg-removal → RAG → Gemini — can take 30–60 s)';
+    outBox.innerHTML = '<span class="status">working…</span>';
+    dl.innerHTML = '';
+    const t0 = performance.now();
+    try {
+      const fd = new FormData();
+      fd.append('prompt', prompt);
+      if (file) fd.append('file', file, file.name);
+      const res = await fetch('/api/posts/generate', { method: 'POST', body: fd, headers: userHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        let hint = '';
+        if (res.status === 429) hint = ' (rate limit — wait a bit or raise POSTGEN_RATE_LIMIT)';
+        if (res.status === 502 && /429|quota/i.test(data.message || '')) {
+          hint = ' (your Google project has no image-generation quota — enable billing in Google AI Studio)';
+        }
+        if (res.status === 503) hint = ' (set GEMINI_API_KEY in Backend/.env and restart)';
+        throw new Error(res.status + ' ' + res.statusText + ' — ' + (data.message || '') + hint);
+      }
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      outBox.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = data.imageUrl;
+      outBox.appendChild(img);
+      dl.innerHTML = '<a class="dl" href="' + data.imageUrl + '" download="post_' + data.id + '.png">⬇ Download PNG</a>';
+      finalPromptEl.textContent = data.finalPrompt || '—';
+      resultCard.style.display = 'block';
+      const engineNote = data.engine === 'pollinations'
+        ? ' — ⚠️ fallback engine: your uploaded photo was NOT used (needs Gemini billing).'
+        : ' — your uploaded photo was used in the design.';
+      statusEl.textContent = '✅ Post generated in ' + secs + 's via ' + (data.engine || 'gemini') +
+        engineNote + ' (id ' + data.id + ')';
+    } catch (e) {
+      statusEl.className = 'status err';
+      statusEl.textContent = '❌ ' + e.message;
+      outBox.innerHTML = '<span class="status err">failed</span>';
+    } finally {
+      updateGoState();
+    }
+  });
+
+  async function rate(id, stars) {
+    statusEl.className = 'status';
+    statusEl.textContent = 'Saving rating ' + stars + '★…';
+    try {
+      const res = await fetch('/api/posts/' + id + '/rate', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, userHeaders()),
+        body: JSON.stringify({ rating: stars }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(res.status + ' — ' + (data.message || ''));
+      statusEl.textContent = '✅ Rated ' + stars + '★' +
+        (stars >= 4 ? ' — added to your style pool.' : ' — removed from your style pool.');
+      loadPosts();
+    } catch (e) {
+      statusEl.className = 'status err';
+      statusEl.textContent = '❌ ' + e.message;
+    }
+  }
+
+  async function loadPosts() {
+    postsEl.innerHTML = '<span class="status">loading…</span>';
+    try {
+      const res = await fetch('/api/posts?limit=10');
+      const posts = await res.json();
+      if (posts.length === 0) {
+        postsEl.innerHTML = '<span class="status">No posts yet — generate the first one above.</span>';
+        return;
+      }
+      postsEl.innerHTML = '';
+      posts.forEach((post) => {
+        const row = document.createElement('div');
+        row.className = 'post';
+        const img = document.createElement('img');
+        img.src = post.imageUrl || 'data:image/svg+xml;utf8,' +
+          encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="84" height="84"><text x="8" y="46" font-size="11" fill="#94a3b8">no image</text></svg>');
+        row.appendChild(img);
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.innerHTML = '<b></b><br><span></span>';
+        meta.querySelector('b').textContent = post.userPrompt;
+        meta.querySelector('span').textContent =
+          (post.rating ? post.rating + '★ · ' : 'unrated · ') + new Date(post.createdAt).toLocaleString();
+        row.appendChild(meta);
+        const stars = document.createElement('div');
+        stars.className = 'stars';
+        for (let n = 1; n <= 5; n += 1) {
+          const b = document.createElement('button');
+          b.textContent = '★';
+          if (post.rating && n <= post.rating) b.classList.add('on');
+          b.title = 'Rate ' + n + ' star' + (n > 1 ? 's' : '');
+          b.addEventListener('click', () => rate(post.id, n));
+          stars.appendChild(b);
+        }
+        row.appendChild(stars);
+        postsEl.appendChild(row);
+      });
+    } catch (e) {
+      postsEl.innerHTML = '<span class="status err">Failed to load posts: ' + e.message + '</span>';
+    }
+  }
+
+  refresh.addEventListener('click', loadPosts);
+  checkHealth();
+  loadPosts();
+</script>
+
+</body>
+</html>
