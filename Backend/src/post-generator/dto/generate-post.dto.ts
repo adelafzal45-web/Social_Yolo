@@ -102,4 +102,18 @@ export class GeneratePostDto {
   @IsOptional()
   @IsIn(POST_OUTPUT_TYPES as unknown as string[])
   outputType?: string;
+
+  @ApiProperty({
+    description:
+      "Free-form design/concept instructions (layout mood, style ideas, do/don'ts) " +
+      'fed to the AI art-director planning pass.',
+    example:
+      'luxury minimal look, product floating on a podium, golden-hour lighting',
+    required: false,
+    maxLength: 1000,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  designConcept?: string;
 }

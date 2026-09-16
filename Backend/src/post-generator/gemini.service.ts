@@ -51,9 +51,16 @@ export class GeminiService {
 
   private readonly client: GoogleGenAI | null;
   private readonly model: string;
+  /** Text model for the design-planning pass (`GEMINI_TEXT_MODEL`). */
+  private readonly textModel: string;
+  /** Read-only accessor for logging which text model is in use. */
+  get textModelForLogging(): string {
+    return this.textModel;
+  }
 
   constructor() {
     this.model = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+    this.textModel = process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash';
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       this.client = new GoogleGenAI({ apiKey });
@@ -165,5 +172,67 @@ export class GeminiService {
         `Gemini image generation failed: ${message}`,
       );
     }
+  }
+
+  /**
+   * Runs the design-PLANNING pass: a text model turns the structured
+   * art-director brief (see `PromptBuilderService.buildPlannerPrompt`) into
+   * a JSON design plan whose `image_generation_prompt` is then rendered by
+   * the image model. Returns null on ANY failure — the pipeline falls back
+   * to the direct detailed prompt, so planning can never break generation.
+   */
+  async generateDesignPlan(
+    plannerPrompt: string,
+  ): Promise<Record<string, unknown> | null> {
+    if (!this.client) {
+      return null;
+    }
+    try {
+      const response = await this.client.models.generateContent({
+        model: this.textModel,
+        contents: plannerPrompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const text = (
+        (response.candidates?.[0]?.content?.parts ?? []) as unknown as Array<{
+          text?: string;
+        }>
+      )
+        .map((part) => part.text ?? '')
+        .join('')
+        .trim();
+      const plan = parseJsonObject(text);
+      if (!plan) {
+        this.logger.warn(
+          'Design planning returned no JSON plan — falling back to the direct prompt.',
+        );
+      }
+      return plan;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Design planning pass failed (${message.slice(0, 200)}) — using the direct prompt.`,
+      );
+      return null;
+    }
+  }
+}
+
+/** Extracts the first JSON object from a model response (fence-tolerant). */
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  const cleaned = text.replace(/```json|```/gi, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(cleaned.slice(start, end + 1));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }

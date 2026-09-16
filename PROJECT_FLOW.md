@@ -143,6 +143,21 @@ normalized to lowercase on write (`posts.category`, `post_embeddings.category`,
 `post_image_embeddings.category`); the seed script tags a whole folder with
 `node scripts/seed-image-posts.cjs --category gym`.
 
+**Design-planning pass (two-stage prompting)**: before rendering, the full
+brief is sent to a Gemini TEXT model (`GEMINI_TEXT_MODEL`, default
+`gemini-2.5-flash`) with the complete art-director template
+(`PromptBuilderService.buildPlannerPrompt()` — core objective, style reference
+analysis, content handling, typography, color system, product presentation,
+layout system, promotional design, category adaptation, quality rules). It
+answers with a JSON design plan whose `image_generation_prompt` becomes the
+master description of the final render prompt
+(`buildRendererPromptFromPlan()`), sent to the image model together with the
+subject, logo and retrieved reference images. Any planning failure degrades
+gracefully to the direct detailed prompt (`buildFinalPrompt()`); the received
+plan is stored inside the post's `designBrief` JSON (`plan` key) and logged.
+The Pollinations fallback also uses the plan's `image_generation_prompt` when
+one exists.
+
 **Step 4 — Image generation** (`post-generator.service.ts` step 3):
 
 - **Gemini path** (`gemini.service.ts`, model `GEMINI_IMAGE_MODEL` =

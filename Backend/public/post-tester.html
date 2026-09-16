@@ -71,6 +71,11 @@
       <textarea id="content" rows="2" maxlength="600" placeholder="e.g. MEGA SALE — 50% OFF | Shop now"></textarea>
       <div class="hint">Rendered verbatim on the design. Leave empty to let the AI invent the copy.</div>
     </div>
+    <div class="field span2">
+      <label>Design / concept instructions (optional)</label>
+      <textarea id="designConcept" rows="2" maxlength="1000" placeholder="e.g. luxury minimal look, product floating on a podium, golden-hour lighting"></textarea>
+      <div class="hint">Art-direction ideas — layout, mood, effects. Fed to the AI design planner.</div>
+    </div>
     <div class="field">
       <label>Category</label>
       <input type="text" id="category" list="categoryList" maxlength="60" placeholder="e.g. gym" />
@@ -163,6 +168,7 @@
 <script>
   const promptInput = document.getElementById('prompt');
   const contentInput = document.getElementById('content');
+  const designConceptInput = document.getElementById('designConcept');
   const categoryInput = document.getElementById('category');
   const colorSchemeInput = document.getElementById('colorScheme');
   const fontInput = document.getElementById('font');
@@ -241,10 +247,12 @@
       const fd = new FormData();
       fd.append('prompt', prompt);
       const content = contentInput.value.trim();
+      const designConcept = designConceptInput.value.trim();
       const category = categoryInput.value.trim();
       const colorScheme = colorSchemeInput.value.trim();
       const font = fontInput.value.trim();
       if (content) fd.append('content', content);
+      if (designConcept) fd.append('designConcept', designConcept);
       if (category) fd.append('category', category);
       if (colorScheme) fd.append('colorScheme', colorScheme);
       if (font) fd.append('font', font);

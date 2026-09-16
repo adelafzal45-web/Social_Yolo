@@ -56,6 +56,8 @@ export interface GeneratePostInput {
   postSize?: string | null;
   /** Output file type (defaults to `png`). */
   outputType?: string | null;
+  /** Free-form design/concept instructions for the planner pass. */
+  designConcept?: string | null;
 }
 
 /**
@@ -125,6 +127,7 @@ export class PostGeneratorService {
       font,
       postSize,
       outputType,
+      designConcept,
     } = input;
     const category = normalizeCategory(input.category);
 
@@ -134,6 +137,7 @@ export class PostGeneratorService {
       content: content?.trim() || null,
       colorScheme: colorScheme?.trim() || null,
       font: font?.trim() || null,
+      designConcept: designConcept?.trim() || null,
       category,
       postSize: (postSize && POST_SIZES[postSize as PostSizeKey]
         ? postSize
@@ -252,12 +256,52 @@ export class PostGeneratorService {
       backgroundRemoved,
       hasLogoImage: Boolean(logoBase64),
     };
-    let finalPrompt = this.promptBuilder.buildFinalPrompt(
-      userPrompt,
-      styles,
-      imageStyles,
-      promptContext,
-    );
+
+    // 2b. Design-PLANNING pass (text model): the structured art-director
+    //     brief is turned into a JSON design plan — layout, palette roles,
+    //     typography hierarchy and a master "image_generation_prompt". The
+    //     plan makes the final render prompt far more detailed and gives
+    //     noticeably better posts. Planning must NEVER break generation:
+    //     any failure degrades to the direct detailed prompt below.
+    let designPlan: Record<string, unknown> | null = null;
+    try {
+      const plannerPrompt = this.promptBuilder.buildPlannerPrompt(
+        userPrompt,
+        styles,
+        imageStyles,
+        promptContext,
+      );
+      this.logger.log(
+        `Planner prompt sent to ${this.geminiService.textModelForLogging}:\n${plannerPrompt}`,
+      );
+      designPlan = await this.geminiService.generateDesignPlan(plannerPrompt);
+      if (designPlan) {
+        this.logger.log(
+          `Design plan received:\n${JSON.stringify(designPlan, null, 2)}`,
+        );
+      } else {
+        this.logger.warn(
+          'Design planning unavailable — using the direct designer prompt. ' +
+            '(Check the warning logged by the planner above for the exact reason.)',
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Design planning skipped (${message}).`);
+    }
+
+    let finalPrompt = designPlan
+      ? this.promptBuilder.buildRendererPromptFromPlan(
+          designPlan,
+          userPrompt,
+          promptContext,
+        )
+      : this.promptBuilder.buildFinalPrompt(
+          userPrompt,
+          styles,
+          imageStyles,
+          promptContext,
+        );
     this.logger.log(`Final prompt sent to ${this.provider}:\n${finalPrompt}`);
 
     // 3. Image generation via the configured provider, with an automatic
@@ -291,15 +335,24 @@ export class PostGeneratorService {
             'Enable billing on your Google AI Studio project for the full pipeline.',
         );
         usedProvider = 'pollinations';
-        finalPrompt = this.promptBuilder.buildFinalPrompt(
-          userPrompt,
-          styles,
-          imageStyles,
-          {
-            ...promptContext,
-            engine: 'pollinations',
-          },
-        );
+        // Pollinations cannot see images, but it CAN follow the planner's
+        // master description — a plan makes the free-engine fallback much
+        // stronger too. Otherwise use the compact designer prompt.
+        const planImagePrompt =
+          designPlan && typeof designPlan.image_generation_prompt === 'string'
+            ? designPlan.image_generation_prompt
+            : null;
+        finalPrompt = planImagePrompt
+          ? `Photorealistic ${POST_SIZES[brief.postSize].aspect} social media post design. Follow this art direction precisely: ${planImagePrompt} Real product photography look, bold clear headline text, sharp focus, high detail, clean modern layout. No cartoon, no anime, no illustration, no animated style.`
+          : this.promptBuilder.buildFinalPrompt(
+              userPrompt,
+              styles,
+              imageStyles,
+              {
+                ...promptContext,
+                engine: 'pollinations',
+              },
+            );
         this.logger.log(
           `Fallback prompt sent to Pollinations:\n${finalPrompt}`,
         );
@@ -323,8 +376,10 @@ export class PostGeneratorService {
         content: brief.content,
         colorScheme: brief.colorScheme,
         font: brief.font,
+        designConcept: brief.designConcept,
         hasSubject: Boolean(subjectBase64),
         hasLogo: Boolean(logoBase64),
+        plan: designPlan ?? undefined,
       },
     });
     // The extension follows the ACTUAL bytes: when the engine cannot emit

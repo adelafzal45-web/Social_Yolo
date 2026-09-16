@@ -110,6 +110,8 @@ export interface DesignBrief {
   colorScheme: string | null;
   /** Font to use for all text on the post. */
   font: string | null;
+  /** Free-form design/concept instructions (layout mood, style ideas, do/don'ts). */
+  designConcept: string | null;
   /** Design category (gym, food, education…) — also scopes RAG retrieval. */
   category: string | null;
   /** Requested post size/format key. */

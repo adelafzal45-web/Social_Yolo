@@ -89,6 +89,13 @@ export class PostGeneratorController {
           example: 'MEGA SALE — 50% OFF | Shop now',
           description: 'Exact copy/text to write on the post (optional).',
         },
+        designConcept: {
+          type: 'string',
+          example:
+            'luxury minimal look, product floating on a podium, golden-hour lighting',
+          description:
+            'Free-form design/concept instructions for the AI art-director planning pass (optional).',
+        },
         colorScheme: {
           type: 'string',
           example: 'navy blue background with orange accents',
@@ -188,6 +195,7 @@ export class PostGeneratorController {
       category: dto.category ?? null,
       postSize: dto.postSize ?? null,
       outputType: dto.outputType ?? null,
+      designConcept: dto.designConcept ?? null,
     });
   }
 
