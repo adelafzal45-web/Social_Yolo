@@ -15,7 +15,9 @@ import { PostsService } from './posts.service';
  * the repositories directly.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Post, PostEmbedding, PostImageEmbedding])],
+  imports: [
+    TypeOrmModule.forFeature([Post, PostEmbedding, PostImageEmbedding]),
+  ],
   providers: [PostsService],
   exports: [
     TypeOrmModule.forFeature([Post, PostEmbedding, PostImageEmbedding]),

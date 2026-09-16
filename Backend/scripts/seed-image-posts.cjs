@@ -17,6 +17,8 @@
  *   node scripts/seed-image-posts.cjs --force                # wipe + reseed
  *   node scripts/seed-image-posts.cjs --no-describe          # CLIP only, no Gemini vision
  *   node scripts/seed-image-posts.cjs --limit 5              # only first N images
+ *   node scripts/seed-image-posts.cjs --category gym         # tag every sample with a design category
+ *                                                            # (RAG retrieval is category-scoped)
  *
  * Requires: Postgres running (DB_* in .env), the Python image-service
  * running on :8000 (CLIP model auto-downloads on first call), and
@@ -190,8 +192,13 @@ async function main() {
   const describe = !args.includes('--no-describe');
   const limitIndex = args.indexOf('--limit');
   const limit = limitIndex !== -1 ? Number(args[limitIndex + 1]) : NaN;
+  const categoryIndex = args.indexOf('--category');
+  const category =
+    categoryIndex !== -1 && args[categoryIndex + 1]
+      ? args[categoryIndex + 1].trim().toLowerCase()
+      : null;
   const folderArg = args.find(
-    (arg, index) => !arg.startsWith('--') && index !== limitIndex + 1,
+    (arg, index) => !arg.startsWith('--') && index !== limitIndex + 1 && index !== categoryIndex + 1,
   );
   const folder = folderArg ? path.resolve(folderArg) : DEFAULT_FOLDER;
 
@@ -210,7 +217,8 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    `Seeding image pool from ${folder} (${files.length} file(s), describe=${doDescribe})…`,
+    `Seeding image pool from ${folder} (${files.length} file(s), describe=${doDescribe}` +
+      `${category ? `, category=${category}` : ''})…`,
   );
 
   // Preflight: the Python CLIP endpoint must be up (first call loads the model).
@@ -234,6 +242,13 @@ async function main() {
     database: process.env.DB_NAME || 'Social Yolo',
   });
   await client.connect();
+
+  // Category column (design-brief feature): make sure it exists even when
+  // the backend has not run its entity sync yet. RAG retrieval filters on
+  // it, so a whole folder can be tagged with --category <name>.
+  for (const table of ['posts', 'post_embeddings', 'post_image_embeddings']) {
+    await client.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS category text`);
+  }
 
   // Table exists even when the backend has not created it yet (mirrors the entity).
   await client.query(`
@@ -341,6 +356,7 @@ async function main() {
         userPrompt,
         clip,
         textEmbedding,
+        category,
       });
 
       seeded += 1;
@@ -367,29 +383,30 @@ function imagePathOf(index, originalName) {
 }
 
 /** Persists one folder image: post row + CLIP embedding + optional text embedding. */
-async function ingestPost(client, { sourcePath, originalName, index, userPrompt, clip, textEmbedding }) {
+async function ingestPost(client, { sourcePath, originalName, index, userPrompt, clip, textEmbedding, category }) {
   const fileName = path.basename(imagePathOf(index, originalName));
   const imagePath = imagePathOf(index, originalName);
   fs.mkdirSync(PUBLIC_REF_DIR, { recursive: true });
   fs.copyFileSync(sourcePath, path.join(PUBLIC_REF_DIR, fileName));
 
   const post = await client.query(
-    `INSERT INTO posts (user_id, user_prompt, final_prompt, image_path, rating)
-     VALUES (NULL, $1, NULL, $2, NULL) RETURNING id`,
-    [userPrompt, imagePath],
+    `INSERT INTO posts (user_id, user_prompt, final_prompt, image_path, rating, category)
+     VALUES (NULL, $1, NULL, $2, NULL, $3) RETURNING id`,
+    [userPrompt, imagePath, category],
   );
   const postId = post.rows[0].id;
 
   await client.query(
     `INSERT INTO post_image_embeddings
-       (post_id, image_path, source, model, dims, embedding, style_metadata)
-     VALUES ($1, $2, 'sample', $3, $4, $5, $6)`,
+       (post_id, image_path, source, model, dims, embedding, category, style_metadata)
+     VALUES ($1, $2, 'sample', $3, $4, $5, $6, $7)`,
     [
       postId,
       imagePath,
       clip.model,
       clip.dims,
       clip.vector,
+      category,
       JSON.stringify({
         seed: SEED_TAG,
         original_name: originalName,
@@ -401,9 +418,15 @@ async function ingestPost(client, { sourcePath, originalName, index, userPrompt,
 
   if (textEmbedding) {
     await client.query(
-      `INSERT INTO post_embeddings (post_id, content_text, source, embedding, style_metadata)
-       VALUES ($1, $2, 'sample', $3, $4)`,
-      [postId, userPrompt, textEmbedding, JSON.stringify({ seed: SEED_TAG, image_seeded: true })],
+      `INSERT INTO post_embeddings (post_id, content_text, source, embedding, category, style_metadata)
+       VALUES ($1, $2, 'sample', $3, $4, $5)`,
+      [
+        postId,
+        userPrompt,
+        textEmbedding,
+        category,
+        JSON.stringify({ seed: SEED_TAG, image_seeded: true }),
+      ],
     );
   }
 }

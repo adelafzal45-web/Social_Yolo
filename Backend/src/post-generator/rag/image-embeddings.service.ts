@@ -57,7 +57,10 @@ export class ImageEmbeddingsService {
     const formData = new FormData();
     const blob = new Blob([buffer as unknown as BlobPart], { type: mimeType });
     formData.append('file', blob, filename);
-    return this.toClipEmbedding(await this.post('embed-image', formData), 'embed-image');
+    return this.toClipEmbedding(
+      await this.post('embed-image', formData),
+      'embed-image',
+    );
   }
 
   /** Embeds a short text prompt with the CLIP text encoder (cached). */
@@ -124,14 +127,22 @@ export class ImageEmbeddingsService {
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);
-      throw new BadGatewayException(`Image embedding service call failed: ${message}`);
+      throw new BadGatewayException(
+        `Image embedding service call failed: ${message}`,
+      );
     }
   }
 
   private toClipEmbedding(data: unknown, endpoint: string): ClipEmbedding {
-    const payload = data as { embedding?: unknown; dimensions?: unknown; model?: unknown };
+    const payload = data as {
+      embedding?: unknown;
+      dimensions?: unknown;
+      model?: unknown;
+    };
     if (!Array.isArray(payload?.embedding) || payload.embedding.length === 0) {
-      throw new BadGatewayException(`${endpoint} returned no embedding vector.`);
+      throw new BadGatewayException(
+        `${endpoint} returned no embedding vector.`,
+      );
     }
     const vector = payload.embedding.map(Number);
     return {

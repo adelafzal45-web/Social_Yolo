@@ -41,6 +41,16 @@ export class PostEmbedding {
   source!: 'user' | 'sample';
 
   /**
+   * Design category (gym, food, education…) of the post this vector
+   * represents. Lets the retriever scope reference lookup to one category
+   * so a post only ever borrows style from its own industry. Normalized
+   * to lowercase on write; NULL = uncategorized (served only to
+   * category-less requests).
+   */
+  @Column({ name: 'category', type: 'text', nullable: true })
+  category!: string | null;
+
+  /**
    * Embedding vector — 768 dimensions from `gemini-embedding-001`
    * (`outputDimensionality: 768`), one float per array slot.
    */

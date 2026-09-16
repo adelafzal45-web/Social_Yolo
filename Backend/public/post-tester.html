@@ -37,32 +37,107 @@
   .stars button { background: #f1f5f9; color: #f59e0b; padding: 3px 7px; font-size: 15px; border-radius: 6px; }
   .stars button.on { background: #fef3c7; }
   .stars button:hover { background: #e2e8f0; }
+  /* ---- design-brief form ---- */
+  .fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 14px; margin: 12px 0; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+  .field select, .field textarea { padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box; font-family: inherit; background: #fff; }
+  .field textarea { resize: vertical; }
+  .field .hint { font-size: 11px; color: #94a3b8; margin-top: 3px; }
+  .span2 { grid-column: span 2; }
+  .chip { display: inline-block; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 999px; padding: 2px 10px; font-size: 12px; margin-right: 6px; }
+  @media (max-width: 640px) { .fields { grid-template-columns: 1fr; } .span2 { grid-column: span 1; } }
 </style>
 </head>
 <body>
 
 <div class="card">
   <h1>🎨 AI Post Generator tester</h1>
-  <p class="status">Type a short prompt (+ optional subject image) — it travels:
-    <code>this page → NestJS :3000 → bg-removal :8000 → RAG → Gemini</code></p>
+  <p class="status">Fill the design brief (+ optional images) — it travels:
+    <code>this page → NestJS :3000 → bg-removal :8000 → RAG (category-scoped) → Gemini</code></p>
   <p class="status">Backend: <span id="srv">checking…</span> · Python service: <span id="pysrv">checking…</span></p>
   <div id="fileWarn" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; padding:10px 14px; margin:10px 0;">
     ⚠️ You opened this file directly from disk (<code>file://</code>), so the API calls can't work.
     Open it via the server instead:
     <a href="http://localhost:3000/post-tester.html">http://localhost:3000/post-tester.html</a>
   </div>
-  <div class="row">
-    <input type="text" id="prompt" placeholder="e.g. Eid sale post with 50% discount" maxlength="300" />
+
+  <div class="fields">
+    <div class="field span2">
+      <label>Post idea / brief *</label>
+      <input type="text" id="prompt" placeholder="e.g. Eid sale post with 50% discount" maxlength="300" />
+    </div>
+    <div class="field span2">
+      <label>Content — text to write on the post (optional)</label>
+      <textarea id="content" rows="2" maxlength="600" placeholder="e.g. MEGA SALE — 50% OFF | Shop now"></textarea>
+      <div class="hint">Rendered verbatim on the design. Leave empty to let the AI invent the copy.</div>
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <input type="text" id="category" list="categoryList" maxlength="60" placeholder="e.g. gym" />
+      <datalist id="categoryList">
+        <option>gym</option><option>education</option><option>drinks</option><option>food</option>
+        <option>restaurant</option><option>fashion</option><option>beauty</option><option>electronics</option>
+        <option>real estate</option><option>travel</option><option>healthcare</option><option>sports</option>
+        <option>ecommerce</option><option>entertainment</option>
+      </datalist>
+      <div class="hint">RAG references are pulled ONLY from this category. Type any category you like.</div>
+    </div>
+    <div class="field">
+      <label>Color scheme</label>
+      <input type="text" id="colorScheme" maxlength="200" placeholder="e.g. navy blue + orange accents, white text" />
+    </div>
+    <div class="field">
+      <label>Font</label>
+      <input type="text" id="font" list="fontList" maxlength="100" placeholder="e.g. Montserrat" />
+      <datalist id="fontList">
+        <option>Arial</option><option>Helvetica</option><option>Roboto</option><option>Open Sans</option>
+        <option>Lato</option><option>Montserrat</option><option>Poppins</option><option>Inter</option>
+        <option>Playfair Display</option><option>Bebas Neue</option><option>Oswald</option><option>Raleway</option>
+      </datalist>
+    </div>
+    <div class="field">
+      <label>Post size / format</label>
+      <select id="postSize">
+        <option value="instagram_post" selected>Instagram post (1:1 · 1080×1080)</option>
+        <option value="instagram_portrait">Instagram portrait (4:5 · 1080×1350)</option>
+        <option value="instagram_story">Instagram story (9:16 · 1080×1920)</option>
+        <option value="meta_feed">Meta / Facebook feed (1.91:1 · 1200×630)</option>
+        <option value="meta_square">Meta / Facebook square (1:1 · 1080×1080)</option>
+        <option value="linkedin_post">LinkedIn post (1.91:1 · 1200×627)</option>
+        <option value="twitter_post">X / Twitter post (16:9 · 1200×675)</option>
+        <option value="pinterest_pin">Pinterest pin (2:3 · 1000×1500)</option>
+        <option value="youtube_thumbnail">YouTube thumbnail (16:9 · 1280×720)</option>
+        <option value="whatsapp_status">WhatsApp status (9:16 · 1080×1920)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Output type</label>
+      <select id="outputType">
+        <option value="png" selected>PNG</option>
+        <option value="jpg">JPG</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Subject image — product/photo (optional)</label>
+      <input type="file" id="file" accept="image/jpeg,image/png,image/webp" />
+      <div class="hint">Background is auto-removed and the subject is featured in the design.</div>
+    </div>
+    <div class="field">
+      <label>Company logo (optional)</label>
+      <input type="file" id="logo" accept="image/jpeg,image/png,image/webp" />
+      <div class="hint">Placed on the design unchanged (corner / header spot).</div>
+    </div>
+    <div class="field">
+      <label>Your user id</label>
+      <input type="text" id="userId" placeholder="e.g. test-user-1" />
+    </div>
   </div>
-  <div class="row">
-    <label>Your user id <input type="text" id="userId" placeholder="e.g. test-user-1" /></label>
-  </div>
-  <input type="file" id="file" accept="image/jpeg,image/png,image/webp" />
+
   <div class="row">
     <button id="go" disabled>Generate post ✨</button>
     <button id="refresh" class="ghost">Refresh recent posts</button>
   </div>
-  <p id="status" class="status">Type a prompt to begin (image optional).</p>
+  <p id="status" class="status">Fill the brief to begin — only the post idea is required.</p>
 </div>
 
 <div class="card" id="resultCard" style="display:none;">
@@ -87,7 +162,14 @@
 
 <script>
   const promptInput = document.getElementById('prompt');
+  const contentInput = document.getElementById('content');
+  const categoryInput = document.getElementById('category');
+  const colorSchemeInput = document.getElementById('colorScheme');
+  const fontInput = document.getElementById('font');
+  const postSizeInput = document.getElementById('postSize');
+  const outputTypeInput = document.getElementById('outputType');
   const fileInput = document.getElementById('file');
+  const logoInput = document.getElementById('logo');
   const userIdInput = document.getElementById('userId');
   const go = document.getElementById('go');
   const refresh = document.getElementById('refresh');
@@ -98,6 +180,7 @@
   const resultCard = document.getElementById('resultCard');
   const postsEl = document.getElementById('posts');
   let file = null;
+  let logo = null;
 
   if (location.protocol === 'file:') {
     document.getElementById('fileWarn').style.display = 'block';
@@ -120,7 +203,15 @@
     statusEl.className = 'status';
     statusEl.textContent = file
       ? 'Subject image: ' + file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)'
-      : 'Image cleared — will generate without a subject.';
+      : 'Subject image cleared — will generate without a subject.';
+  });
+
+  logoInput.addEventListener('change', () => {
+    logo = logoInput.files[0] || null;
+    statusEl.className = 'status';
+    statusEl.textContent = logo
+      ? 'Logo: ' + logo.name + ' (' + (logo.size / 1024).toFixed(0) + ' KB)'
+      : 'Logo cleared — will generate without a company logo.';
   });
 
   async function checkHealth() {
@@ -149,7 +240,18 @@
     try {
       const fd = new FormData();
       fd.append('prompt', prompt);
+      const content = contentInput.value.trim();
+      const category = categoryInput.value.trim();
+      const colorScheme = colorSchemeInput.value.trim();
+      const font = fontInput.value.trim();
+      if (content) fd.append('content', content);
+      if (category) fd.append('category', category);
+      if (colorScheme) fd.append('colorScheme', colorScheme);
+      if (font) fd.append('font', font);
+      fd.append('postSize', postSizeInput.value);
+      fd.append('outputType', outputTypeInput.value);
       if (file) fd.append('file', file, file.name);
+      if (logo) fd.append('logo', logo, logo.name);
       const res = await fetch('/api/posts/generate', { method: 'POST', body: fd, headers: userHeaders() });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -166,12 +268,28 @@
       const img = document.createElement('img');
       img.src = data.imageUrl;
       outBox.appendChild(img);
-      dl.innerHTML = '<a class="dl" href="' + data.imageUrl + '" download="post_' + data.id + '.png">⬇ Download PNG</a>';
+      const ext = data.format === 'image/jpeg' ? 'jpg' : 'png';
+      dl.innerHTML = '<a class="dl" href="' + data.imageUrl + '" download="post_' + data.id +
+        '.' + ext + '">⬇ Download ' + ext.toUpperCase() + '</a>';
       finalPromptEl.textContent = data.finalPrompt || '—';
+
+      const chips = [];
+      if (data.category) chips.push('🏷 ' + data.category);
+      if (data.postSize) chips.push('📐 ' + data.postSize);
+      if (data.outputType) {
+        const fmtNote = data.format && data.format !== 'image/png' && data.format !== 'image/jpeg'
+          ? '?' : (data.format === 'image/jpeg' ? ' (actual: jpg)' : (data.outputType === 'jpg' ? ' (actual: png ⚠️)' : ''));
+        chips.push('📄 ' + data.outputType.toUpperCase() + fmtNote);
+      }
+      const chipLine = document.createElement('div');
+      chipLine.style.margin = '8px 0';
+      chipLine.innerHTML = chips.map((chip) => '<span class="chip">' + chip + '</span>').join('');
+      resultCard.insertBefore(chipLine, resultCard.firstChild);
+
       resultCard.style.display = 'block';
       const engineNote = data.engine === 'pollinations'
         ? ' — ⚠️ fallback engine: your uploaded photo was NOT used (needs Gemini billing).'
-        : ' — your uploaded photo was used in the design.';
+        : (file ? ' — your uploaded photo was used in the design.' : '');
       statusEl.textContent = '✅ Post generated in ' + secs + 's via ' + (data.engine || 'gemini') +
         engineNote + ' (id ' + data.id + ')';
     } catch (e) {
@@ -224,8 +342,13 @@
         meta.className = 'meta';
         meta.innerHTML = '<b></b><br><span></span>';
         meta.querySelector('b').textContent = post.userPrompt;
+        const extras = [];
+        if (post.category) extras.push('🏷 ' + post.category);
+        if (post.postSize) extras.push('📐 ' + post.postSize);
         meta.querySelector('span').textContent =
-          (post.rating ? post.rating + '★ · ' : 'unrated · ') + new Date(post.createdAt).toLocaleString();
+          (post.rating ? post.rating + '★ · ' : 'unrated · ') +
+          (extras.length ? extras.join(' · ') + ' · ' : '') +
+          new Date(post.createdAt).toLocaleString();
         row.appendChild(meta);
         const stars = document.createElement('div');
         stars.className = 'stars';

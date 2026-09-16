@@ -81,10 +81,28 @@ statically from `Backend/public`).
 
 ## 4. Generation flow — the life of one request
 
-`POST /api/posts/generate` (multipart: `prompt`, optional `file`, header `x-user-id`)
+`POST /api/posts/generate` — multipart form (header `x-user-id`):
 
-**Step 0 — Browser** (`public/post-tester.html`): builds `FormData` with the prompt
-and the selected file, sends with the `x-user-id` header.
+| Part | Required | Purpose |
+|---|---|---|
+| `prompt` | ✔ | Short post idea/brief — expanded into the full designer prompt |
+| `file` | – | Subject image (product/photo); background removed first |
+| `logo` | – | Company logo; attached unchanged and placed on the design |
+| `content` | – | Exact copy/text to write ON the post (rendered verbatim) |
+| `colorScheme` | – | Brand colors (names, hex codes or description) |
+| `font` | – | Font for all text on the post |
+| `category` | – | Design category (gym, education, drinks, food… — free text) |
+| `postSize` | – | Canvas format: `instagram_post` (default), `instagram_portrait`, `instagram_story`, `meta_feed`, `meta_square`, `linkedin_post`, `twitter_post`, `pinterest_pin`, `youtube_thumbnail`, `whatsapp_status` |
+| `outputType` | – | `png` (default) or `jpg` |
+
+All fields except `prompt` are optional — the final prompt is built dynamically
+from whatever was provided (see `post-generator/design-brief.ts` for the catalog).
+Swagger documents every field at `/api/docs`.
+
+**Step 0 — Browser** (`public/post-tester.html`): collects the full design brief
+(prompt, content, category, color scheme, font, post size, output type) plus the
+optional subject image and company logo, builds `FormData` and sends it with the
+`x-user-id` header.
 
 **Step 1 — Rate limit** (`post-generator/rate-limit.service.ts`):
 `RateLimitService.consume(userId)` — sliding window of `POSTGEN_RATE_LIMIT` (10)
@@ -118,16 +136,26 @@ retrieve top text style references (Gemini space) AND top image style references
 the final designer brief. Logged as "Final prompt sent to <engine>". Each axis
 degrades independently — if CLIP is unavailable only the image references are lost.
 
+**Category scoping**: when the request carries a `category`, BOTH retrievals
+filter to past posts of that SAME category — a gym post only borrows style from
+gym posts. Posts without a category serve category-less requests. Categories are
+normalized to lowercase on write (`posts.category`, `post_embeddings.category`,
+`post_image_embeddings.category`); the seed script tags a whole folder with
+`node scripts/seed-image-posts.cjs --category gym`.
+
 **Step 4 — Image generation** (`post-generator.service.ts` step 3):
 
 - **Gemini path** (`gemini.service.ts`, model `GEMINI_IMAGE_MODEL` =
   `gemini-2.5-flash-image` aka "Nano Banana"): the request contents are
-  `[ your photo (inlineData), up to 2 retrieved style-reference images
-  (inlineData), final prompt (text) ]` — **images first**, because
-  editing models anchor better on a reference that precedes the text. The
-  reference images are the top matches from the image-side RAG pool (past
-  posts that LOOK like the request). The prompt demands the subject appear
-  EXACTLY as photographed (never substituted) and a PHOTOREALISTIC result
+  `[ your photo (inlineData), company logo (inlineData, optional), up to 2
+  retrieved style-reference images (inlineData), final prompt (text) ]` —
+  **images first**, because editing models anchor better on a reference that
+  precedes the text. The prompt maps each attachment: subject FIRST (must appear
+  EXACTLY as photographed, never substituted), logo SECOND (copied exactly,
+  placed in a prominent spot), references are style ONLY. The design brief is
+  woven in as explicit requirements: exact canvas for the requested `postSize`,
+  the brand `category`, the `colorScheme`, the `font`, the verbatim `content`
+  copy and the requested `outputType` — plus a PHOTOREALISTIC result
   (no cartoon/anime/illustration).
 - **Automatic fallback**: any Gemini failure (today: 429 quota, free tier has
   `limit: 0`) logs a warning and retries with `PollinationsService` — a free
@@ -136,17 +164,24 @@ degrades independently — if CLIP is unavailable only the image references are 
 - `usedProvider` records which engine actually produced the image.
 
 **Step 5 — Persistence** (`posts/posts.service.ts` + disk):
-`createPost()` inserts the `posts` row (gets a uuid) → the PNG/JPEG is written
-to `Backend/public/generated-posts/<uuid>.<ext>` → `post.imagePath` is updated
-to `generated-posts/<uuid>.<ext>`. Static serving makes it reachable at
-`/<imagePath>`. Finally the generated image itself is CLIP-embedded into
-`post_image_embeddings` with `source: 'generated'` (NOT retrieved until rated
-≥ 4 — see §7), so the image pool grows automatically with every generation.
+`createPost()` inserts the `posts` row (gets a uuid, together with the
+`category`, `postSize`, `outputType` and the structured `designBrief` JSON) →
+the PNG/JPEG is written to `Backend/public/generated-posts/<uuid>.<ext>` →
+`post.imagePath` is updated to `generated-posts/<uuid>.<ext>`. Static serving
+makes it reachable at `/<imagePath>`. The file extension follows the ACTUAL
+bytes — when the engine cannot emit the requested format (Gemini always
+returns PNG) the response's `format` field reports the real type. Finally the
+generated image itself is CLIP-embedded into `post_image_embeddings` (tagged
+with the same `category`) with `source: 'generated'` (NOT retrieved until
+rated ≥ 4 — see §7), so the image pool grows automatically with every
+generation.
 
 **Step 6 — Response** to the browser:
-`{ id, imageUrl, userPrompt, finalPrompt, rating: null, engine: usedProvider, createdAt }`.
-The tester shows the image plus an honest engine note
-("your uploaded photo was used" vs "⚠️ fallback: photo was NOT used").
+`{ id, imageUrl, userPrompt, finalPrompt, category, postSize, outputType,
+format, designBrief, rating: null, engine: usedProvider, createdAt }`.
+The tester shows the image, the design-brief chips (category / size / output
+type) and an honest engine note ("your uploaded photo was used" vs "⚠️
+fallback: photo was NOT used").
 
 ## 5. Where the uploaded image physically goes (summary)
 

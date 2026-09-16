@@ -42,17 +42,26 @@ export class FeedbackService {
    * @param userId Optional identity (x-user-id header until real auth).
    *   If the post has no owner yet, the first rater claims it.
    */
-  async ratePost(id: string, rating: number, userId: string | null): Promise<PostResponseDto> {
+  async ratePost(
+    id: string,
+    rating: number,
+    userId: string | null,
+  ): Promise<PostResponseDto> {
     const post = await this.postsService.findPostById(id);
     if (!post) {
       throw new NotFoundException(`Post ${id} not found.`);
     }
 
     const ownerId = post.userId ?? userId ?? null;
-    await this.postsService.postRepository.update({ id }, { rating, userId: ownerId });
+    await this.postsService.postRepository.update(
+      { id },
+      { rating, userId: ownerId },
+    );
 
     const embedRepo = this.postsService.embeddingRepository;
-    const existing = await embedRepo.findOne({ where: { postId: id, source: 'user' } });
+    const existing = await embedRepo.findOne({
+      where: { postId: id, source: 'user' },
+    });
 
     if (rating >= RATING_POOL_THRESHOLD) {
       // The style lives in the winning final prompt (+ the short brief).
@@ -60,22 +69,32 @@ export class FeedbackService {
         ? `${post.userPrompt} — ${post.finalPrompt}`
         : post.userPrompt;
       const embedding = await this.embeddingsService.embedText(contentText);
+      const metadata = {
+        ratedAt: new Date().toISOString(),
+        rating,
+        category: post.category ?? undefined,
+      };
 
       if (existing) {
         existing.contentText = contentText;
         existing.embedding = embedding;
-        existing.styleMetadata = { ratedAt: new Date().toISOString(), rating };
+        existing.category = post.category ?? null;
+        existing.styleMetadata = metadata;
         await embedRepo.save(existing);
       } else {
         await embedRepo.insert({
           postId: id,
           contentText,
           source: 'user',
+          category: post.category ?? null,
           embedding,
-          styleMetadata: { ratedAt: new Date().toISOString(), rating },
+          styleMetadata: metadata,
         });
       }
-      this.logger.log(`Post ${id} rated ${rating}★ — added to the personal RAG style pool.`);
+      this.logger.log(
+        `Post ${id} rated ${rating}★ — added to the personal RAG style pool` +
+          (post.category ? ` (category "${post.category}").` : '.'),
+      );
 
       // Image side: CLIP-embed the post's actual picture into the personal
       // image-style pool. A CLIP/Python failure must not fail the rating —
@@ -83,13 +102,19 @@ export class FeedbackService {
       if (post.imagePath) {
         try {
           const imageRepo = this.postsService.imageEmbeddingRepository;
-          const buffer = await readFile(resolve(process.cwd(), 'public', post.imagePath));
+          const buffer = await readFile(
+            resolve(process.cwd(), 'public', post.imagePath),
+          );
           const clip = await this.imageEmbeddingsService.embedImage(
             buffer,
             post.imagePath,
             mimeFromImagePath(post.imagePath),
           );
-          const metadata = { ratedAt: new Date().toISOString(), rating };
+          const metadata = {
+            ratedAt: new Date().toISOString(),
+            rating,
+            category: post.category ?? undefined,
+          };
           const existingImage = await imageRepo.findOne({
             where: { postId: id, source: 'user' },
           });
@@ -98,6 +123,7 @@ export class FeedbackService {
             existingImage.model = clip.model;
             existingImage.dims = clip.dimensions;
             existingImage.embedding = clip.vector;
+            existingImage.category = post.category ?? null;
             existingImage.styleMetadata = metadata;
             await imageRepo.save(existingImage);
           } else {
@@ -108,12 +134,16 @@ export class FeedbackService {
               model: clip.model,
               dims: clip.dimensions,
               embedding: clip.vector,
+              category: post.category ?? null,
               styleMetadata: metadata,
             });
           }
-          this.logger.log(`Post ${id} image added to the personal image-style pool.`);
+          this.logger.log(
+            `Post ${id} image added to the personal image-style pool.`,
+          );
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           this.logger.warn(
             `Post ${id} image could not be added to the image-style pool (${message}).`,
           );
@@ -126,9 +156,10 @@ export class FeedbackService {
           `Post ${id} rated ${rating}★ — removed from the personal RAG style pool.`,
         );
       }
-      const existingImage = await this.postsService.imageEmbeddingRepository.findOne({
-        where: { postId: id, source: 'user' },
-      });
+      const existingImage =
+        await this.postsService.imageEmbeddingRepository.findOne({
+          where: { postId: id, source: 'user' },
+        });
       if (existingImage) {
         await this.postsService.imageEmbeddingRepository.remove(existingImage);
         this.logger.log(
@@ -146,6 +177,10 @@ export class FeedbackService {
       imageUrl: updated.imagePath ? `/${updated.imagePath}` : null,
       userPrompt: updated.userPrompt,
       finalPrompt: updated.finalPrompt,
+      category: updated.category,
+      postSize: updated.postSize,
+      outputType: updated.outputType,
+      designBrief: updated.designBrief,
       rating: updated.rating,
       createdAt: updated.createdAt,
     };

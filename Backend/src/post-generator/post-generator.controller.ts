@@ -10,10 +10,10 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
-  UploadedFile,
+  UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBody,
   ApiConsumes,
@@ -50,7 +50,15 @@ export class PostGeneratorController {
   ) {}
 
   @Post('generate')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_PHOTO_BYTES } }))
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'file', maxCount: 1 },
+        { name: 'logo', maxCount: 1 },
+      ],
+      { limits: { fileSize: MAX_PHOTO_BYTES } },
+    ),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -60,13 +68,69 @@ export class PostGeneratorController {
           type: 'string',
           format: 'binary',
           description:
-            'Optional subject image (jpg/png/webp, max 5 MB). Its background is removed ' +
-            'via the image-processing pipeline before generation.',
+            'Optional subject/product image (jpg/png/webp, max 5 MB). Its background is ' +
+            'removed via the image-processing pipeline; it becomes the FIRST attached image.',
+        },
+        logo: {
+          type: 'string',
+          format: 'binary',
+          description:
+            'Optional company logo (jpg/png/webp, max 5 MB). Attached SECOND, placed on ' +
+            'the design unchanged in a prominent spot.',
         },
         prompt: {
           type: 'string',
           example: 'Eid sale post with 50% discount',
-          description: 'Short description of the post; expanded into a full designer prompt automatically.',
+          description:
+            'Short description of the post; expanded into a full designer prompt automatically.',
+        },
+        content: {
+          type: 'string',
+          example: 'MEGA SALE — 50% OFF | Shop now',
+          description: 'Exact copy/text to write on the post (optional).',
+        },
+        colorScheme: {
+          type: 'string',
+          example: 'navy blue background with orange accents',
+          description:
+            'Brand color scheme (names, hex codes or description) (optional).',
+        },
+        font: {
+          type: 'string',
+          example: 'Montserrat',
+          description: 'Font to use for all text on the post (optional).',
+        },
+        category: {
+          type: 'string',
+          example: 'gym',
+          description:
+            'Design category (gym, education, drinks, food… — free text). Scopes RAG ' +
+            'retrieval to past posts of the same category (optional).',
+        },
+        postSize: {
+          type: 'string',
+          example: 'instagram_post',
+          enum: [
+            'instagram_post',
+            'instagram_portrait',
+            'instagram_story',
+            'meta_feed',
+            'meta_square',
+            'linkedin_post',
+            'twitter_post',
+            'pinterest_pin',
+            'youtube_thumbnail',
+            'whatsapp_status',
+          ],
+          description:
+            'Post size/format — sets the exact canvas (e.g. instagram_story = 9:16, ' +
+            '1080x1920). Defaults to instagram_post.',
+        },
+        outputType: {
+          type: 'string',
+          enum: ['jpg', 'png'],
+          example: 'png',
+          description: 'Output file type. Defaults to png.',
         },
       },
       required: ['prompt'],
@@ -75,13 +139,26 @@ export class PostGeneratorController {
   @ApiOperation({
     summary: 'Generate a designer-style social media post',
     description:
-      'Accepts a short prompt and an optional subject image. The image goes through the ' +
-      'background-removal pipeline, the prompt is expanded automatically, and Google Gemini ' +
-      'returns a finished post image that is stored and served from /generated-posts/.',
+      'Accepts a short prompt, an optional structured design brief (content copy, color ' +
+      'scheme, font, category, post size, output type), an optional subject image and an ' +
+      'optional company logo. The subject goes through the background-removal pipeline, ' +
+      'the RAG layer retrieves category-matched style references, and the whole brief is ' +
+      'expanded into a designer prompt that Google Gemini renders into a finished post.',
   })
-  @ApiResponse({ status: 201, description: 'Post generated successfully.', type: PostResponseDto })
-  @ApiResponse({ status: 400, description: 'Missing/invalid prompt, invalid image, or Gemini refused.' })
-  @ApiResponse({ status: 503, description: 'GEMINI_API_KEY is not configured.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Post generated successfully.',
+    type: PostResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Missing/invalid prompt, invalid image or logo, or Gemini refused.',
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'GEMINI_API_KEY is not configured.',
+  })
   @ApiResponse({ status: 502, description: 'Gemini API call failed.' })
   @ApiHeaders([
     {
@@ -93,27 +170,50 @@ export class PostGeneratorController {
     },
   ])
   async generate(
-    @UploadedFile() file: UploadType | undefined,
+    @UploadedFiles()
+    files: { file?: UploadType[]; logo?: UploadType[] } | undefined,
     @Body() dto: GeneratePostDto,
     @Headers('x-user-id') userId?: string,
   ): Promise<PostResponseDto> {
     // Cost control — counts every attempt, even ones that fail at Gemini.
     this.rateLimitService.consume(userId ?? 'anonymous');
-    return this.postGeneratorService.generatePost(dto.prompt.trim(), file, userId ?? null);
+    return this.postGeneratorService.generatePost({
+      userPrompt: dto.prompt.trim(),
+      userId: userId ?? null,
+      file: files?.file?.[0],
+      logo: files?.logo?.[0],
+      content: dto.content ?? null,
+      colorScheme: dto.colorScheme ?? null,
+      font: dto.font ?? null,
+      category: dto.category ?? null,
+      postSize: dto.postSize ?? null,
+      outputType: dto.outputType ?? null,
+    });
   }
 
   @Get()
   @ApiOperation({ summary: 'List the most recent generated posts' })
-  @ApiResponse({ status: 200, description: 'Recent posts, newest first.', type: [PostResponseDto] })
+  @ApiResponse({
+    status: 200,
+    description: 'Recent posts, newest first.',
+    type: [PostResponseDto],
+  })
   async list(@Query('limit') limit?: string): Promise<PostResponseDto[]> {
     const parsed = Number(limit);
-    const take = Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), 100) : 20;
+    const take =
+      Number.isFinite(parsed) && parsed > 0
+        ? Math.min(Math.floor(parsed), 100)
+        : 20;
     const posts = await this.postsService.listPosts(take);
     return posts.map((post) => ({
       id: post.id,
       imageUrl: post.imagePath ? `/${post.imagePath}` : null,
       userPrompt: post.userPrompt,
       finalPrompt: post.finalPrompt,
+      category: post.category,
+      postSize: post.postSize,
+      outputType: post.outputType,
+      designBrief: post.designBrief,
       rating: post.rating,
       createdAt: post.createdAt,
     }));
@@ -122,9 +222,15 @@ export class PostGeneratorController {
   @Get(':id')
   @ApiParam({ name: 'id', format: 'uuid', description: 'Generated post id' })
   @ApiOperation({ summary: 'Fetch one generated post by id' })
-  @ApiResponse({ status: 200, description: 'The post record.', type: PostResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'The post record.',
+    type: PostResponseDto,
+  })
   @ApiNotFoundResponse({ description: 'No post with this id.' })
-  async getById(@Param('id', ParseUUIDPipe) id: string): Promise<PostResponseDto> {
+  async getById(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PostResponseDto> {
     const post = await this.postsService.findPostById(id);
     if (!post) {
       throw new NotFoundException(`Post ${id} not found.`);
@@ -134,6 +240,10 @@ export class PostGeneratorController {
       imageUrl: post.imagePath ? `/${post.imagePath}` : null,
       userPrompt: post.userPrompt,
       finalPrompt: post.finalPrompt,
+      category: post.category,
+      postSize: post.postSize,
+      outputType: post.outputType,
+      designBrief: post.designBrief,
       rating: post.rating,
       createdAt: post.createdAt,
     };
@@ -159,7 +269,11 @@ export class PostGeneratorController {
       'style pool so future generations match your taste; lower ratings remove ' +
       'it from the pool.',
   })
-  @ApiResponse({ status: 200, description: 'Rating stored; style pool updated.', type: PostResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Rating stored; style pool updated.',
+    type: PostResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Invalid rating or post id.' })
   @ApiNotFoundResponse({ description: 'No post with this id.' })
   async rate(

@@ -13,6 +13,14 @@ export interface CreatePostInput {
   userPrompt: string;
   finalPrompt?: string | null;
   imagePath?: string | null;
+  /** Design category (gym, food, education…) — scopes RAG retrieval. */
+  category?: string | null;
+  /** Requested post size/format key (e.g. `instagram_post`). */
+  postSize?: string | null;
+  /** Requested output file type (`jpg` | `png`). */
+  outputType?: string | null;
+  /** Structured design brief (content copy, colors, font…) as JSON. */
+  designBrief?: Record<string, unknown> | null;
 }
 
 /**
@@ -39,6 +47,10 @@ export class PostsService {
       userPrompt: input.userPrompt,
       finalPrompt: input.finalPrompt ?? null,
       imagePath: input.imagePath ?? null,
+      category: input.category ?? null,
+      postSize: input.postSize ?? null,
+      outputType: input.outputType ?? null,
+      designBrief: input.designBrief ?? null,
     });
     return this.postsRepo.save(post);
   }

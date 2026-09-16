@@ -17,9 +17,15 @@ export interface GeneratePostImageParams {
   /** MIME type of the input image; defaults to image/png. */
   imageMimeType?: string;
   /**
+   * Optional company brand logo (raw bytes, base64) — attached right after
+   * the subject so the prompt can point at it and the model places it on
+   * the design unchanged.
+   */
+  logoImage?: { base64: string; mimeType?: string };
+  /**
    * Optional style-reference images (top matches from the image-side RAG
    * pool — past post designs whose look fits the request). They are appended
-   * after the subject image and BEFORE the prompt text.
+   * after the subject and logo and BEFORE the prompt text.
    */
   referenceImages?: Array<{ base64: string; mimeType?: string }>;
 }
@@ -68,7 +74,9 @@ export class GeminiService {
    * Generates one finished post image. When `imageBase64` is provided the
    * model edits/incorporates that image; otherwise it generates from text alone.
    */
-  async generatePostImage(params: GeneratePostImageParams): Promise<GeneratedImage> {
+  async generatePostImage(
+    params: GeneratePostImageParams,
+  ): Promise<GeneratedImage> {
     if (!this.client) {
       throw new ServiceUnavailableException(
         'Gemini is not configured: set GEMINI_API_KEY in Backend/.env and restart the backend.',
@@ -76,15 +84,24 @@ export class GeminiService {
     }
 
     // Image first, then the instructions — editing models anchor better on
-    // the reference photo when it precedes the prompt text. Style-reference
-    // images (retrieved past posts) go after the subject, still before the
-    // text, so the brief can point at them ("reference images attached...").
+    // the reference photo when it precedes the prompt text. Attachment
+    // order (mirrored by the prompt): subject FIRST, company logo SECOND,
+    // style-reference images (retrieved past posts) after — still before
+    // the text, so the brief can point at each of them.
     const contents: Array<Record<string, unknown>> = [];
     if (params.imageBase64) {
       contents.push({
         inlineData: {
           mimeType: params.imageMimeType || 'image/png',
           data: params.imageBase64,
+        },
+      });
+    }
+    if (params.logoImage?.base64) {
+      contents.push({
+        inlineData: {
+          mimeType: params.logoImage.mimeType || 'image/png',
+          data: params.logoImage.base64,
         },
       });
     }
@@ -106,12 +123,15 @@ export class GeminiService {
         contents,
       });
 
-      const parts = (response.candidates?.[0]?.content?.parts ?? []) as unknown as Array<{
+      const parts = (response.candidates?.[0]?.content?.parts ??
+        []) as unknown as Array<{
         text?: string;
         inlineData?: { mimeType?: string; data?: string };
       }>;
 
-      const imagePart = parts.find((part) => part.inlineData && part.inlineData.data);
+      const imagePart = parts.find(
+        (part) => part.inlineData && part.inlineData.data,
+      );
       if (!imagePart || !imagePart.inlineData?.data) {
         const textOut = parts
           .map((part) => part.text ?? '')
@@ -141,7 +161,9 @@ export class GeminiService {
       }
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Gemini image generation failed: ${message}`);
-      throw new BadGatewayException(`Gemini image generation failed: ${message}`);
+      throw new BadGatewayException(
+        `Gemini image generation failed: ${message}`,
+      );
     }
   }
 }

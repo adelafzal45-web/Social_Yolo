@@ -14,6 +14,8 @@ export interface RetrievedStyle {
   contentText: string;
   /** 'user' = the user's own past post, 'sample' = global reference pool. */
   source: 'user' | 'sample';
+  /** Design category of the referenced post (gym, food, education…). */
+  category: string | null;
   /** Cosine similarity to the current request, 0..1 (higher = closer). */
   similarity: number;
 }
@@ -27,6 +29,8 @@ export interface RetrievedImageStyle {
   userPrompt: string;
   /** 'user' = the user's own rated post, 'sample' = global reference pool. */
   source: 'user' | 'sample';
+  /** Design category of the referenced post (gym, food, education…). */
+  category: string | null;
   /** Cosine similarity (CLIP space) to the current request, 0..1. */
   similarity: number;
 }
@@ -64,15 +68,22 @@ export class RetrieverService {
    * Returns the most relevant style references: up to `TOP_USER` from the
    * given user's high-rated posts (when `userId` is provided) and up to
    * `TOP_SAMPLE` from the global sample pool, best matches first.
+   *
+   * When `category` is provided, ONLY posts of that same category are
+   * considered (case-insensitive); uncategorized posts serve category-less
+   * requests.
    */
   async retrieveStyleContext(
     userId: string | null,
     queryEmbedding: number[],
+    category?: string | null,
   ): Promise<RetrievedStyle[]> {
     const rows = await this.embeddingRepo.find({ relations: { post: true } });
+    const wantedCategory = normalizeCategory(category);
 
     const scored = rows
       .filter((row) => row.embedding && row.embedding.length > 0)
+      .filter((row) => matchesCategory(row.category, wantedCategory))
       .map((row) => ({
         row,
         similarity: cosineSimilarity(queryEmbedding, row.embedding),
@@ -90,7 +101,9 @@ export class RetrieverService {
         )
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, TOP_USER)
-        .forEach(({ row, similarity }) => results.push(toStyle(row, similarity)));
+        .forEach(({ row, similarity }) =>
+          results.push(toStyle(row, similarity)),
+        );
     }
 
     scored
@@ -110,14 +123,19 @@ export class RetrieverService {
    * Only rows produced by the SAME CLIP `model` are considered — vectors
    * from different models live in incompatible spaces. `generated` rows are
    * excluded: they join the pools via the rating feedback loop. A post is
-   * returned at most once ('user' wins over 'sample').
+   * returned at most once ('user' wins over 'sample'). When `category` is
+   * provided, ONLY posts of that same category are considered.
    */
   async retrieveImageContext(
     userId: string | null,
     queryEmbedding: number[],
     model: string,
+    category?: string | null,
   ): Promise<RetrievedImageStyle[]> {
-    const rows = await this.imageEmbeddingRepo.find({ relations: { post: true } });
+    const rows = await this.imageEmbeddingRepo.find({
+      relations: { post: true },
+    });
+    const wantedCategory = normalizeCategory(category);
 
     const scored = rows
       .filter(
@@ -127,6 +145,7 @@ export class RetrieverService {
           row.model === model &&
           row.source !== 'generated',
       )
+      .filter((row) => matchesCategory(row.category, wantedCategory))
       .map((row) => ({
         row,
         similarity: cosineSimilarity(queryEmbedding, row.embedding),
@@ -165,12 +184,30 @@ export class RetrieverService {
   }
 }
 
+/** Normalizes a category for comparison: trimmed lowercase, null when empty. */
+function normalizeCategory(category?: string | null): string | null {
+  const cleaned = category?.trim().toLowerCase();
+  return cleaned ? cleaned : null;
+}
+
+/** True when the row's category satisfies the requested scope (null scope = everything). */
+function matchesCategory(
+  rowCategory: string | null,
+  wanted: string | null,
+): boolean {
+  if (wanted === null) {
+    return true;
+  }
+  return normalizeCategory(rowCategory) === wanted;
+}
+
 function toStyle(row: PostEmbedding, similarity: number): RetrievedStyle {
   return {
     postId: row.postId,
     userPrompt: row.post.userPrompt,
     contentText: row.contentText,
     source: row.source,
+    category: row.category ?? null,
     similarity,
   };
 }
@@ -184,6 +221,7 @@ function toImageStyle(
     imagePath: row.imagePath,
     userPrompt: row.post.userPrompt,
     source: row.source === 'user' ? 'user' : 'sample',
+    category: row.category ?? null,
     similarity,
   };
 }
