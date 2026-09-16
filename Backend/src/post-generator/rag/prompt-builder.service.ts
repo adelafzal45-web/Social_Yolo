@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 
-import { RetrievedStyle } from './retriever.service';
+import { RetrievedImageStyle, RetrievedStyle } from './retriever.service';
 
 /** Maximum characters of each style summary that go into the final prompt. */
 const MAX_SUMMARY_CHARS = 220;
+/** How many retrieved reference images get attached to the Gemini call. */
+const MAX_REFERENCE_IMAGES = 2;
 
 /**
  * Turns a short user prompt into a detailed designer-style prompt by
@@ -18,13 +20,14 @@ export class PromptBuilderService {
     hasSubjectImage: boolean,
     engine: 'gemini' | 'pollinations' = 'gemini',
     backgroundRemoved = true,
+    imageStyles: RetrievedImageStyle[] = [],
   ): string {
     // Image-generation engines (FLUX etc.) do best with a compact, visual
     // prompt — long instruction briefs turn into muddy output. The full
     // designer brief below is meant for instruction-following editing
     // models like Gemini's image model.
     if (engine === 'pollinations') {
-      return this.buildCompactImagePrompt(userPrompt, styles);
+      return this.buildCompactImagePrompt(userPrompt, styles, imageStyles);
     }
 
     const lines: string[] = [];
@@ -41,6 +44,23 @@ export class PromptBuilderService {
           `${index + 1}. [${origin}] Brief: "${style.userPrompt}" — ${truncate(style.contentText, MAX_SUMMARY_CHARS)}`,
         );
       });
+    }
+
+    if (imageStyles.length > 0) {
+      lines.push(
+        'Reference images attached AFTER the subject show past post designs — mirror their visual style (layout, palette, typography, composition):',
+      );
+      imageStyles.slice(0, MAX_REFERENCE_IMAGES).forEach((reference, index) => {
+        const origin = reference.source === 'user' ? 'your past post' : 'sample';
+        lines.push(
+          `${index + 1}. [${origin}] "${reference.userPrompt}" (${(reference.similarity * 100).toFixed(0)}% style match)`,
+        );
+      });
+      lines.push(
+        hasSubjectImage
+          ? 'The FIRST attached image is the subject to feature; every other attached image is a style reference ONLY — copy its design language, never its content.'
+          : 'The attached images are style references ONLY — copy their design language, never their content.',
+      );
     }
 
     lines.push(
@@ -61,17 +81,30 @@ export class PromptBuilderService {
   /**
    * Compact prompt tuned for pure text-to-image engines: concrete visual
    * descriptors only, no meta-instructions, style hints from the top RAG
-   * matches boiled down to palette/mood keywords.
+   * matches boiled down to palette/mood keywords. Pollinations cannot see
+   * images, so retrieved image references contribute their briefs as text.
    */
-  private buildCompactImagePrompt(userPrompt: string, styles: RetrievedStyle[]): string {
+  private buildCompactImagePrompt(
+    userPrompt: string,
+    styles: RetrievedStyle[],
+    imageStyles: RetrievedImageStyle[] = [],
+  ): string {
     const styleHints = styles
       .slice(0, 2)
       .map((style) => truncate(style.contentText, 140))
       .join(' ');
 
+    const imageHints = imageStyles
+      .slice(0, MAX_REFERENCE_IMAGES)
+      .map((reference) => reference.userPrompt)
+      .join(', ');
+
     return [
       `Photorealistic social media post photograph: ${userPrompt}. If a person is shown, it must be a real-looking human with a realistic face, natural skin and natural lighting.`,
       styleHints ? `Style direction: ${styleHints}` : '',
+      imageHints
+        ? `Match the look of these past post designs: ${imageHints}.`
+        : '',
       'Real product photography look, bold clear headline text, vibrant colors, sharp focus, high detail, clean modern layout. No cartoon, no anime, no illustration, no animated style.',
     ]
       .filter(Boolean)

@@ -3,3 +3,5 @@ uvicorn
 python-multipart
 pillow
 rembg[cpu]
+# CLIP image/text embeddings for the RAG image-style pool (pulls in torch CPU)
+sentence-transformers

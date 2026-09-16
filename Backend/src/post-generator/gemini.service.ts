@@ -16,6 +16,12 @@ export interface GeneratePostImageParams {
   imageBase64?: string;
   /** MIME type of the input image; defaults to image/png. */
   imageMimeType?: string;
+  /**
+   * Optional style-reference images (top matches from the image-side RAG
+   * pool — past post designs whose look fits the request). They are appended
+   * after the subject image and BEFORE the prompt text.
+   */
+  referenceImages?: Array<{ base64: string; mimeType?: string }>;
 }
 
 /** One generated image returned by Gemini. */
@@ -70,7 +76,9 @@ export class GeminiService {
     }
 
     // Image first, then the instructions — editing models anchor better on
-    // the reference photo when it precedes the prompt text.
+    // the reference photo when it precedes the prompt text. Style-reference
+    // images (retrieved past posts) go after the subject, still before the
+    // text, so the brief can point at them ("reference images attached...").
     const contents: Array<Record<string, unknown>> = [];
     if (params.imageBase64) {
       contents.push({
@@ -79,6 +87,16 @@ export class GeminiService {
           data: params.imageBase64,
         },
       });
+    }
+    for (const reference of params.referenceImages ?? []) {
+      if (reference?.base64) {
+        contents.push({
+          inlineData: {
+            mimeType: reference.mimeType || 'image/png',
+            data: reference.base64,
+          },
+        });
+      }
     }
     contents.push({ text: params.prompt });
 

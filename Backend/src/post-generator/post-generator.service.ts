@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import { resolve } from 'path';
 
 import { UploadedFile } from '../common/upload/image-upload';
@@ -10,8 +10,16 @@ import { GeminiService } from './gemini.service';
 import type { GeneratedImage } from './gemini.service';
 import { PollinationsService } from './providers/pollinations.service';
 import { EmbeddingsService } from './rag/embeddings.service';
+import {
+  ImageEmbeddingsService,
+  mimeFromImagePath,
+} from './rag/image-embeddings.service';
 import { PromptBuilderService } from './rag/prompt-builder.service';
-import { RetrievedStyle, RetrieverService } from './rag/retriever.service';
+import {
+  RetrievedImageStyle,
+  RetrievedStyle,
+  RetrieverService,
+} from './rag/retriever.service';
 
 /**
  * Orchestrates one post generation:
@@ -42,6 +50,7 @@ export class PostGeneratorService {
     private readonly pollinationsService: PollinationsService,
     private readonly postsService: PostsService,
     private readonly embeddingsService: EmbeddingsService,
+    private readonly imageEmbeddingsService: ImageEmbeddingsService,
     private readonly retrieverService: RetrieverService,
     private readonly promptBuilder: PromptBuilderService,
   ) {}
@@ -84,7 +93,14 @@ export class PostGeneratorService {
     }
 
     // 2. RAG — embed → retrieve → build. Failures degrade gracefully.
+    //    Two retrievals run here:
+    //    a) TEXT style: Gemini embedding of the prompt vs. past captions
+    //       (post_embeddings);
+    //    b) IMAGE style: CLIP text embedding of the prompt vs. past post
+    //       IMAGES (post_image_embeddings) — finds posts that LOOK like
+    //       what the user is asking for.
     let styles: RetrievedStyle[] = [];
+    let imageStyles: RetrievedImageStyle[] = [];
     try {
       const queryEmbedding = await this.embeddingsService.embedText(userPrompt);
       styles = await this.retrieverService.retrieveStyleContext(userId, queryEmbedding);
@@ -99,12 +115,33 @@ export class PostGeneratorService {
       this.logger.warn(`RAG style retrieval skipped (${message}). Proceeding without it.`);
     }
 
+    try {
+      const imageQuery = await this.imageEmbeddingsService.embedQuery(userPrompt);
+      imageStyles = await this.retrieverService.retrieveImageContext(
+        userId,
+        imageQuery.vector,
+        imageQuery.model,
+      );
+      this.logger.log(
+        `RAG retrieved ${imageStyles.length} image style reference(s) via ${imageQuery.model}: ` +
+          imageStyles
+            .map((ref) => `${ref.source}(${(ref.similarity * 100).toFixed(0)}%)`)
+            .join(', '),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `RAG image-style retrieval skipped (${message}). Proceeding without it.`,
+      );
+    }
+
     let finalPrompt = this.promptBuilder.buildFinalPrompt(
       userPrompt,
       styles,
       Boolean(subjectBase64),
       this.provider,
       backgroundRemoved,
+      imageStyles,
     );
     this.logger.log(`Final prompt sent to ${this.provider}:\n${finalPrompt}`);
 
@@ -124,6 +161,7 @@ export class PostGeneratorService {
         generated = await this.geminiService.generatePostImage({
           prompt: finalPrompt,
           imageBase64: subjectBase64,
+          referenceImages: await this.loadReferenceImages(imageStyles),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -133,7 +171,14 @@ export class PostGeneratorService {
             'Enable billing on your Google AI Studio project for the full pipeline.',
         );
         usedProvider = 'pollinations';
-        finalPrompt = this.promptBuilder.buildFinalPrompt(userPrompt, styles, false, 'pollinations');
+        finalPrompt = this.promptBuilder.buildFinalPrompt(
+          userPrompt,
+          styles,
+          false,
+          'pollinations',
+          true,
+          imageStyles,
+        );
         this.logger.log(`Fallback prompt sent to Pollinations:\n${finalPrompt}`);
         generated = await this.pollinationsService.generatePostImage({ prompt: finalPrompt });
       }
@@ -152,6 +197,32 @@ export class PostGeneratorService {
     const imagePath = `generated-posts/${fileName}`;
     await this.postsService.postRepository.update(post.id, { imagePath });
 
+    // 5. Image-side RAG write-back: embed the freshly generated post image
+    //    with CLIP so future generations can retrieve it visually. It stays
+    //    'generated' (not retrieved) until rated >= 4 — FeedbackService then
+    //    flips it into the user's image-style pool.
+    try {
+      const clip = await this.imageEmbeddingsService.embedImage(
+        Buffer.from(generated.imageBase64, 'base64'),
+        fileName,
+        generated.mimeType,
+      );
+      await this.postsService.imageEmbeddingRepository.insert({
+        postId: post.id,
+        imagePath,
+        source: 'generated',
+        model: clip.model,
+        dims: clip.dimensions,
+        embedding: clip.vector,
+        styleMetadata: { engine: usedProvider, generatedAt: new Date().toISOString() },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Generated image was not added to the image-style pool (${message}).`,
+      );
+    }
+
     this.logger.log(`Generated post ${post.id} via ${usedProvider} (${imagePath})`);
 
     return {
@@ -164,4 +235,32 @@ export class PostGeneratorService {
       createdAt: post.createdAt,
     };
   }
+
+  /**
+   * Loads the retrieved reference images from `public/` as base64 payloads
+   * for the Gemini call (top matches only; missing files are skipped so a
+   * broken reference never blocks generation).
+   */
+  private async loadReferenceImages(
+    imageStyles: RetrievedImageStyle[],
+    limit = 2,
+  ): Promise<Array<{ base64: string; mimeType: string }>> {
+    const references: Array<{ base64: string; mimeType: string }> = [];
+    for (const style of imageStyles.slice(0, limit)) {
+      try {
+        const buffer = await readFile(resolve(process.cwd(), 'public', style.imagePath));
+        references.push({
+          base64: buffer.toString('base64'),
+          mimeType: mimeFromImagePath(style.imagePath),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Reference image ${style.imagePath} could not be loaded (${message}).`,
+        );
+      }
+    }
+    return references;
+  }
+
 }

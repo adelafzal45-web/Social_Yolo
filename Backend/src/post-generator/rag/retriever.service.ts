@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { PostEmbedding } from '../../posts/entities/post-embedding.entity';
+import { PostImageEmbedding } from '../../posts/entities/post-image-embedding.entity';
 
 /** One retrieved style reference handed to the prompt builder. */
 export interface RetrievedStyle {
@@ -17,9 +18,25 @@ export interface RetrievedStyle {
   similarity: number;
 }
 
+/** One retrieved IMAGE style reference (past post whose look matches the prompt). */
+export interface RetrievedImageStyle {
+  postId: string;
+  /** Path (relative to `Backend/public`) of the reference image file. */
+  imagePath: string;
+  /** The short brief of the referenced post. */
+  userPrompt: string;
+  /** 'user' = the user's own rated post, 'sample' = global reference pool. */
+  source: 'user' | 'sample';
+  /** Cosine similarity (CLIP space) to the current request, 0..1. */
+  similarity: number;
+}
+
 /** How many references to pull from each pool. */
 const TOP_USER = 2;
 const TOP_SAMPLE = 3;
+/** Image-side pools (CLIP). */
+const TOP_IMAGE_USER = 2;
+const TOP_IMAGE_SAMPLE = 3;
 /** Only the user's posts rated at least this high enter their style pool. */
 const MIN_USER_RATING = 4;
 
@@ -39,6 +56,8 @@ export class RetrieverService {
   constructor(
     @InjectRepository(PostEmbedding)
     private readonly embeddingRepo: Repository<PostEmbedding>,
+    @InjectRepository(PostImageEmbedding)
+    private readonly imageEmbeddingRepo: Repository<PostImageEmbedding>,
   ) {}
 
   /**
@@ -82,6 +101,68 @@ export class RetrieverService {
 
     return results;
   }
+
+  /**
+   * Image-side retrieval (CLIP): the caller embeds the user's prompt with
+   * the CLIP text encoder, this finds the past post IMAGES that look most
+   * similar (cosine in CLIP's shared text+image space).
+   *
+   * Only rows produced by the SAME CLIP `model` are considered — vectors
+   * from different models live in incompatible spaces. `generated` rows are
+   * excluded: they join the pools via the rating feedback loop. A post is
+   * returned at most once ('user' wins over 'sample').
+   */
+  async retrieveImageContext(
+    userId: string | null,
+    queryEmbedding: number[],
+    model: string,
+  ): Promise<RetrievedImageStyle[]> {
+    const rows = await this.imageEmbeddingRepo.find({ relations: { post: true } });
+
+    const scored = rows
+      .filter(
+        (row) =>
+          row.embedding &&
+          row.embedding.length > 0 &&
+          row.model === model &&
+          row.source !== 'generated',
+      )
+      .map((row) => ({
+        row,
+        similarity: cosineSimilarity(queryEmbedding, row.embedding),
+      }));
+
+    const results: RetrievedImageStyle[] = [];
+    const seenPosts = new Set<string>();
+    const push = (row: PostImageEmbedding, similarity: number) => {
+      if (seenPosts.has(row.postId)) {
+        return;
+      }
+      seenPosts.add(row.postId);
+      results.push(toImageStyle(row, similarity));
+    };
+
+    if (userId) {
+      scored
+        .filter(
+          ({ row }) =>
+            row.source === 'user' &&
+            row.post.userId === userId &&
+            (row.post.rating ?? 0) >= MIN_USER_RATING,
+        )
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, TOP_IMAGE_USER)
+        .forEach(({ row, similarity }) => push(row, similarity));
+    }
+
+    scored
+      .filter(({ row }) => row.source === 'sample')
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, TOP_IMAGE_SAMPLE)
+      .forEach(({ row, similarity }) => push(row, similarity));
+
+    return results;
+  }
 }
 
 function toStyle(row: PostEmbedding, similarity: number): RetrievedStyle {
@@ -90,6 +171,19 @@ function toStyle(row: PostEmbedding, similarity: number): RetrievedStyle {
     userPrompt: row.post.userPrompt,
     contentText: row.contentText,
     source: row.source,
+    similarity,
+  };
+}
+
+function toImageStyle(
+  row: PostImageEmbedding,
+  similarity: number,
+): RetrievedImageStyle {
+  return {
+    postId: row.postId,
+    imagePath: row.imagePath,
+    userPrompt: row.post.userPrompt,
+    source: row.source === 'user' ? 'user' : 'sample',
     similarity,
   };
 }

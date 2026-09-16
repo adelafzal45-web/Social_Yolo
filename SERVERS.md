@@ -79,6 +79,7 @@ Details:
 | URL | Expect |
 |---|---|
 | http://localhost:8000/ | `{"message": "Image processing service is running"}` |
+| http://localhost:8000/embedding-health | `{"model": "clip-ViT-B-32", "loaded": true, "dimensions": 512, ...}` (loaded=true after the first embed call or `warmup_clip.py`) |
 | http://localhost:3000/api | backend root route |
 | http://localhost:3000/api/image-processing/health | backend -> python wiring check |
 | http://localhost:3000/api/docs | Swagger UI for the API |

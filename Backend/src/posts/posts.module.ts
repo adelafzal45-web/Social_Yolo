@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { Post } from './entities/post.entity';
 import { PostEmbedding } from './entities/post-embedding.entity';
+import { PostImageEmbedding } from './entities/post-image-embedding.entity';
 import { PostsService } from './posts.service';
 
 /**
@@ -14,8 +15,11 @@ import { PostsService } from './posts.service';
  * the repositories directly.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Post, PostEmbedding])],
+  imports: [TypeOrmModule.forFeature([Post, PostEmbedding, PostImageEmbedding])],
   providers: [PostsService],
-  exports: [TypeOrmModule.forFeature([Post, PostEmbedding]), PostsService],
+  exports: [
+    TypeOrmModule.forFeature([Post, PostEmbedding, PostImageEmbedding]),
+    PostsService,
+  ],
 })
 export class PostsModule {}

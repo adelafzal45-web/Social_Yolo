@@ -8,6 +8,7 @@ import { PollinationsService } from './providers/pollinations.service';
 import { PostGeneratorController } from './post-generator.controller';
 import { PostGeneratorService } from './post-generator.service';
 import { EmbeddingsService } from './rag/embeddings.service';
+import { ImageEmbeddingsService } from './rag/image-embeddings.service';
 import { PromptBuilderService } from './rag/prompt-builder.service';
 import { RateLimitService } from './rate-limit.service';
 import { RetrieverService } from './rag/retriever.service';
@@ -24,6 +25,7 @@ import { RetrieverService } from './rag/retriever.service';
     PollinationsService,
     PostGeneratorService,
     EmbeddingsService,
+    ImageEmbeddingsService,
     RetrieverService,
     PromptBuilderService,
     FeedbackService,

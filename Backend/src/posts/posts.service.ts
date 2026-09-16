@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { Post } from './entities/post.entity';
 import { PostEmbedding } from './entities/post-embedding.entity';
+import { PostImageEmbedding } from './entities/post-image-embedding.entity';
 
 /** Data needed to persist one generated post. */
 export interface CreatePostInput {
@@ -27,6 +28,8 @@ export class PostsService {
     private readonly postsRepo: Repository<Post>,
     @InjectRepository(PostEmbedding)
     private readonly embeddingsRepo: Repository<PostEmbedding>,
+    @InjectRepository(PostImageEmbedding)
+    private readonly imageEmbeddingsRepo: Repository<PostImageEmbedding>,
   ) {}
 
   /** Persists a generated post record. */
@@ -59,6 +62,11 @@ export class PostsService {
   /** Direct access for the RAG modules (Module 3). */
   get embeddingRepository(): Repository<PostEmbedding> {
     return this.embeddingsRepo;
+  }
+
+  /** Direct access for the image-side RAG modules. */
+  get imageEmbeddingRepository(): Repository<PostImageEmbedding> {
+    return this.imageEmbeddingsRepo;
   }
 
   /** Direct access for the RAG modules (Module 3). */

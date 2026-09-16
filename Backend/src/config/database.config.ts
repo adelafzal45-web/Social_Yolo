@@ -4,6 +4,7 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 import { Post } from '../posts/entities/post.entity';
 import { PostEmbedding } from '../posts/entities/post-embedding.entity';
+import { PostImageEmbedding } from '../posts/entities/post-image-embedding.entity';
 
 /**
  * TypeORM connection to the project Postgres database ("Social Yolo").
@@ -20,7 +21,7 @@ export const databaseConfig: TypeOrmModuleOptions = {
   username: process.env.DB_USERNAME || 'postgres',
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_NAME || 'Social Yolo',
-  entities: [Post, PostEmbedding],
+  entities: [Post, PostEmbedding, PostImageEmbedding],
   synchronize: true,
   logging: ['error', 'warn'],
 };
