@@ -20,7 +20,11 @@ export interface UploadedFile {
   size: number;
 }
 
-export const ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const ALLOWED_IMAGE_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+];
 export const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /** Reads an `UploadedFile` into a `Buffer`, working with both disk and memory storage. */

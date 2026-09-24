@@ -17,12 +17,17 @@ import {
 
 import { ImageProcessingService } from './image-processing.service';
 import type { UploadedFile as UploadType } from '../common/upload/image-upload';
-import { ALLOWED_IMAGE_MIME_TYPES, MAX_PHOTO_BYTES } from '../common/upload/image-upload';
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  MAX_PHOTO_BYTES,
+} from '../common/upload/image-upload';
 
 @ApiTags('image-processing')
 @Controller('image-processing')
 export class ImageProcessingController {
-  constructor(private readonly imageProcessingService: ImageProcessingService) {}
+  constructor(
+    private readonly imageProcessingService: ImageProcessingService,
+  ) {}
 
   /**
    * Standalone endpoint that lets the frontend send *any* image through
@@ -53,7 +58,11 @@ export class ImageProcessingController {
     summary: 'Remove background and enhance an image (Python microservice)',
     description: `Accepts ${ALLOWED_IMAGE_MIME_TYPES.join(', ')} up to ${MAX_PHOTO_BYTES / (1024 * 1024)} MB. Returns the processed PNG.`,
   })
-  @ApiResponse({ status: 201, description: 'Processed image bytes (PNG).', type: Buffer })
+  @ApiResponse({
+    status: 201,
+    description: 'Processed image bytes (PNG).',
+    type: Buffer,
+  })
   @ApiResponse({ status: 400, description: 'Invalid or oversized file.' })
   async removeBackground(
     @UploadedFile() file: UploadType | undefined,

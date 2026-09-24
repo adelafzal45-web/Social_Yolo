@@ -11,10 +11,12 @@ import {
   Post,
   Query,
   UploadedFiles,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiHeaders,
@@ -28,6 +30,11 @@ import {
 import { MAX_PHOTO_BYTES } from '../common/upload/image-upload';
 import type { UploadedFile as UploadType } from '../common/upload/image-upload';
 import { PostsService } from '../posts/posts.service';
+import { BillingService } from '../billing/billing.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { User } from '../auth/entities/user.entity';
+
 import { GeneratePostDto } from './dto/generate-post.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { RatePostDto } from './dto/rate-post.dto';
@@ -40,6 +47,8 @@ import { RateLimitService } from './rate-limit.service';
  * posts from a short prompt and an optional subject image.
  */
 @ApiTags('post-generator')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 @Controller('posts')
 export class PostGeneratorController {
   constructor(
@@ -47,6 +56,7 @@ export class PostGeneratorController {
     private readonly postsService: PostsService,
     private readonly feedbackService: FeedbackService,
     private readonly rateLimitService: RateLimitService,
+    private readonly billingService: BillingService,
   ) {}
 
   @Post('generate')
@@ -180,13 +190,17 @@ export class PostGeneratorController {
     @UploadedFiles()
     files: { file?: UploadType[]; logo?: UploadType[] } | undefined,
     @Body() dto: GeneratePostDto,
-    @Headers('x-user-id') userId?: string,
+    @CurrentUser() user: User,
   ): Promise<PostResponseDto> {
+    // Billing gate — free users get FREE_GENERATIONS attempts, Pro users are
+    // unlimited. Throws 402 TRIAL_EXHAUSTED once the free quota is used up.
+    this.billingService.assertCanGenerate(user);
+
     // Cost control — counts every attempt, even ones that fail at Gemini.
-    this.rateLimitService.consume(userId ?? 'anonymous');
-    return this.postGeneratorService.generatePost({
+    this.rateLimitService.consume(user.id);
+    const response = await this.postGeneratorService.generatePost({
       userPrompt: dto.prompt.trim(),
-      userId: userId ?? null,
+      userId: user.id,
       file: files?.file?.[0],
       logo: files?.logo?.[0],
       content: dto.content ?? null,
@@ -197,6 +211,10 @@ export class PostGeneratorController {
       outputType: dto.outputType ?? null,
       designConcept: dto.designConcept ?? null,
     });
+
+    // Credit is burned only after a successful generation.
+    await this.billingService.consumeCredit(user);
+    return response;
   }
 
   @Get()

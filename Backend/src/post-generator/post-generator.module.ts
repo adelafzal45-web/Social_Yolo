@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
 import { ImageProcessingModule } from '../image-processing/image-processing.module';
 import { PostsModule } from '../posts/posts.module';
 import { GeminiService } from './gemini.service';
@@ -18,7 +20,7 @@ import { RetrieverService } from './rag/retriever.service';
  * retriever, prompt builder) on top of the Module 2 Gemini integration.
  */
 @Module({
-  imports: [ImageProcessingModule, PostsModule],
+  imports: [ImageProcessingModule, PostsModule, AuthModule, BillingModule],
   controllers: [PostGeneratorController],
   providers: [
     GeminiService,

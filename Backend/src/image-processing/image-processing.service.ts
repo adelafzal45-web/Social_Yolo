@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { UploadedFile } from '../common/upload/image-upload';
 import { readFileBuffer } from '../common/upload/image-upload';
 import {
@@ -45,22 +42,23 @@ export class ImageProcessingService {
    * actually removed — callers use this to keep prompts truthful when the
    * Python service falls back to the original image.
    */
-  async processImageWithStatus(file: UploadedFile): Promise<ProcessedImageResult> {
+  async processImageWithStatus(
+    file: UploadedFile,
+  ): Promise<ProcessedImageResult> {
     const originalBytes = await readFileBuffer(file);
 
     try {
       const formData = new FormData();
-      const blob = new Blob([originalBytes as unknown as BlobPart], { type: file.mimetype });
+      const blob = new Blob([originalBytes as unknown as BlobPart], {
+        type: file.mimetype,
+      });
       formData.append('file', blob, file.originalname);
 
-      const response = await fetch(
-        `${IMAGE_SERVICE_URL}/process-image`,
-        {
-          method: 'POST',
-          body: formData,
-          signal: AbortSignal.timeout(IMAGE_SERVICE_TIMEOUT_MS),
-        },
-      );
+      const response = await fetch(`${IMAGE_SERVICE_URL}/process-image`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(IMAGE_SERVICE_TIMEOUT_MS),
+      });
 
       if (!response.ok) {
         const text = await response.text().catch(() => '');

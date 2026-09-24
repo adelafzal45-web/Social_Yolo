@@ -51,7 +51,9 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('Image Processing API')
-    .setDescription('Background removal & enhancement via the Python microservice')
+    .setDescription(
+      'Background removal & enhancement via the Python microservice',
+    )
     .setVersion('1.0')
     .build();
 

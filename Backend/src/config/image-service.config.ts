@@ -10,5 +10,6 @@ export const IMAGE_SERVICE_URL =
   process.env.IMAGE_SERVICE_URL || 'http://localhost:8000';
 
 /** Default timeout (ms) for a single image-processing request. */
-export const IMAGE_SERVICE_TIMEOUT_MS =
-  Number(process.env.IMAGE_SERVICE_TIMEOUT_MS ?? 30_000);
+export const IMAGE_SERVICE_TIMEOUT_MS = Number(
+  process.env.IMAGE_SERVICE_TIMEOUT_MS ?? 30_000,
+);
