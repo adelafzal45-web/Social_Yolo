@@ -1,93 +1,136 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { UploadedFile } from '../common/upload/image-upload';
 import { readFileBuffer } from '../common/upload/image-upload';
-import {
-  IMAGE_SERVICE_URL,
-  IMAGE_SERVICE_TIMEOUT_MS,
-} from '../config/image-service.config';
+import { RedisCacheService } from '../common/cache/redis-cache.service';
+import { BackgroundRemovalQueueService } from './background-removal-queue.service';
+
+export interface ProcessImageOptions {
+  model?: string;
+  preserveText?: boolean;
+  alphaMatting?: boolean;
+  postProcess?: boolean;
+}
+
+export interface ProcessedImageResult {
+  buffer: Buffer;
+  backgroundRemoved: boolean;
+  engine: string;
+  error?: string;
+  jobId?: string;
+  durationMs?: number;
+}
 
 @Injectable()
 export class ImageProcessingService {
   private readonly logger = new Logger(ImageProcessingService.name);
 
+  constructor(
+    private readonly queueService: BackgroundRemovalQueueService,
+    private readonly cache: RedisCacheService,
+  ) {}
+
+  async processImage(
+    file: UploadedFile,
+    options: ProcessImageOptions = {},
+  ): Promise<Buffer> {
+    return (await this.processImageWithStatus(file, options)).buffer;
+  }
+
   /**
-   * Sends an image to the Python microservice for background removal
-   * and enhancement (sharpness + contrast).
-   *
-   * If the Python service is unreachable or returns an error, the
-   * **original** image bytes are returned so that the calling upload
-   * still succeeds — the pipeline degrades gracefully.
-   *
-   * @param file The uploaded file (multer `UploadedFile`).
-   * @returns Processed PNG bytes from Python, or the original bytes as a fallback.
+   * Processes an image by routing it through the Redis Queue.
+   * Concurrency is controlled, and repeat requests are served instantly via cache.
    */
-  async processImage(file: UploadedFile): Promise<Buffer> {
+  async processImageWithStatus(
+    file: UploadedFile,
+    options: ProcessImageOptions = {},
+  ): Promise<ProcessedImageResult> {
     const originalBytes = await readFileBuffer(file);
+    const mimeType = this.detectMimeType(originalBytes);
 
     try {
-      const formData = new FormData();
-      const blob = new Blob([originalBytes as unknown as BlobPart], { type: file.mimetype });
-      formData.append('file', blob, file.originalname);
-
-      const response = await fetch(
-        `${IMAGE_SERVICE_URL}/process-image`,
-        {
-          method: 'POST',
-          body: formData,
-          signal: AbortSignal.timeout(IMAGE_SERVICE_TIMEOUT_MS),
-        },
+      const result = await this.queueService.enqueueAndWait(
+        originalBytes,
+        mimeType,
+        options,
       );
 
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        this.logger.warn(
-          `Image service responded ${response.status}: ${text || response.statusText}. ` +
-            'Falling back to original image.',
-        );
-        return originalBytes;
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      return {
+        buffer: result.buffer,
+        backgroundRemoved: result.backgroundRemoved,
+        engine: result.engine,
+        error: result.error,
+        jobId: result.jobId,
+        durationMs: result.durationMs,
+      };
+    } catch (err: any) {
       this.logger.warn(
-        `Image service unavailable (${message}). Falling back to original image.`,
+        `Redis queue background removal exception (${err?.message || err}). Returning original image bytes.`,
       );
-      return originalBytes;
+      return {
+        buffer: originalBytes,
+        backgroundRemoved: false,
+        engine: 'passthrough-fallback',
+        error: err?.message,
+      };
     }
   }
 
   /**
-   * Returns the original image bytes **without** calling Python.
-   * Useful when you want to skip background removal (e.g. the caller
-   * knows the image already has a transparent background).
+   * Pushes a background removal job to the Redis Queue asynchronously.
+   * Returns immediately with the jobId and queue position.
    */
+  async enqueueAsync(
+    file: UploadedFile,
+    options: ProcessImageOptions = {},
+  ) {
+    const originalBytes = await readFileBuffer(file);
+    const mimeType = this.detectMimeType(originalBytes);
+    return this.queueService.enqueueAsync(originalBytes, mimeType, options);
+  }
+
+  /**
+   * Fetches job status and result from the Redis Queue.
+   */
+  async getJobStatus(jobId: string) {
+    return this.queueService.getJobStatus(jobId);
+  }
+
   async processImageOptional(
     file: UploadedFile,
     enabled: boolean,
+    options: ProcessImageOptions = {},
   ): Promise<Buffer> {
     if (!enabled) {
       return readFileBuffer(file);
     }
-    return this.processImage(file);
+    return this.processImage(file, options);
   }
 
-  /**
-   * Health-check: returns `true` when the Python service responds on its
-   * root endpoint within the configured timeout.
-   */
   async checkHealth(): Promise<boolean> {
-    try {
-      const response = await fetch(`${IMAGE_SERVICE_URL}/`, {
-        signal: AbortSignal.timeout(5_000),
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+    return true;
+  }
+
+  private detectMimeType(bytes: Buffer): string {
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+      return 'image/jpeg';
+    if (
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47
+    )
+      return 'image/png';
+    if (
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46 &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x45 &&
+      bytes[10] === 0x42 &&
+      bytes[11] === 0x50
+    )
+      return 'image/webp';
+    return 'image/jpeg';
   }
 }

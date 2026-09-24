@@ -1,0 +1,53 @@
+{
+  "statuses": {
+    "creatorLogin": 200,
+    "restrictedLogin": 200,
+    "missing": 401,
+    "restricted": 403,
+    "expired": 401,
+    "processing": 200,
+    "legacyTester": 200,
+    "providers": 200
+  },
+  "result": {
+    "success": true,
+    "file": {
+      "format": "png",
+      "transparent": true,
+      "width": 512,
+      "height": 512,
+      "sizeBytes": 99124
+    },
+    "provider": "imgly",
+    "processingTimeMs": 5311,
+    "transparencyReport": {
+      "hasAlphaChannel": true,
+      "isTransparent": true,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    "qualityReport": {
+      "coverage": 0.514007568359375,
+      "opaqueFrac": 0.3959083557128906,
+      "transparentFrac": 0.485992431640625,
+      "transitionBandFrac": 0.2297616220388292,
+      "hazeFrac": 0.051475390369886596,
+      "borderOpaqueFrac": 0.15459882583170254,
+      "minAlpha": 0,
+      "maxAlpha": 254,
+      "verdict": "OK",
+      "details": "Matte is clean, well-isolated, and ready for refinement."
+    },
+    "refinement": {
+      "applied": true,
+      "stages": [
+        "decontaminate",
+        "alpha-curve"
+      ]
+    },
+    "providerChain": [
+      "imgly"
+    ],
+    "fallbackUsed": false
+  }
+}
