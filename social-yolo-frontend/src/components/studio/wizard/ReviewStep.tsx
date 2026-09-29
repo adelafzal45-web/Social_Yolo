@@ -276,32 +276,29 @@ export function ReviewStep({
         </div>
       </div>
 
-      {/* Credit balance & Generate CTA box */}
-      <div className="p-6 rounded-3xl bg-gradient-to-br from-brand-900 via-indigo-950 to-slate-950 text-white shadow-xl shadow-brand-900/20 border border-brand-700/40 text-center space-y-4">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-amber-300 text-xs font-semibold">
-            <Zap className="w-3.5 h-3.5 fill-amber-300" />
-            <span>
-              Generation Cost: {(formData.variationsCount || 1) * 5} Credits (Balance: {userCredits} Credits)
-            </span>
-          </div>
-          <h3 className="text-xl font-bold tracking-tight">Ready to bring your post to life?</h3>
-          <p className="text-xs text-slate-300 max-w-md mx-auto">
-            Our multi-agent pipeline will synthesize the art concept, typography, and visual assets in high definition.
-          </p>
-        </div>
-
+      {/* Graceful & UI-friendly Generate CTA */}
+      <div className="pt-4 pb-2 flex flex-col items-center justify-center gap-3">
         <button
           type="button"
           onClick={onGenerate}
           disabled={isGenerating}
-          className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-brand-500 via-indigo-500 to-amber-400 hover:from-brand-400 hover:to-amber-300 text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-brand-500/30 transition-all hover:scale-[1.02] active:scale-[0.98] inline-flex items-center justify-center gap-2"
+          className="group relative inline-flex items-center justify-center gap-3 px-10 py-4 rounded-2xl bg-gradient-to-r from-brand-600 via-indigo-600 to-violet-600 hover:from-brand-500 hover:via-indigo-500 hover:to-violet-500 text-white font-bold text-base shadow-xl shadow-brand-500/25 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
         >
-          <Sparkles className="w-5 h-5 fill-slate-950" />
-          <span>
-            ✨ Generate {(formData.variationsCount || 1) === 1 ? 'My Post' : `${formData.variationsCount} Post Variants`}
-          </span>
+          <Sparkles className="w-5 h-5 text-amber-300 group-hover:rotate-12 transition-transform duration-200" />
+          <span>Generate My Post</span>
+          {Boolean(formData.variationsCount && formData.variationsCount > 1) && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-white">
+              {formData.variationsCount} Variants
+            </span>
+          )}
         </button>
+
+        <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+          <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+          <span>
+            {(formData.variationsCount || 1) * 5} Credits · Balance: {userCredits} Credits
+          </span>
+        </div>
       </div>
     </div>
   );

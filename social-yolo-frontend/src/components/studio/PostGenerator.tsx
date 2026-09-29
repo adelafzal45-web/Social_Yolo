@@ -10,6 +10,10 @@ import {
   AlertCircle,
   Building2,
   RefreshCw,
+  Coins,
+  X,
+  CreditCard,
+  ArrowRight,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useNotification } from '@/context/NotificationContext';
@@ -104,6 +108,14 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
 
   // Result state
   const [generatedPost, setGeneratedPost] = useState<FinalPostResult | null>(null);
+
+  // Insufficient credits modal state
+  const [showInsufficientModal, setShowInsufficientModal] = useState<boolean>(false);
+  const [insufficientData, setInsufficientData] = useState<{
+    required: number;
+    available: number;
+    needed: number;
+  }>({ required: 5, available: 0, needed: 5 });
 
   const userCredits = user?.credits ?? 50;
 
@@ -362,6 +374,18 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
 
   // Trigger Real AI Generation
   const handleGenerate = async () => {
+    const requiredCredits = (formData.variationsCount || 1) * 5;
+    const available = user?.credits ?? 0;
+    if (available < requiredCredits) {
+      setInsufficientData({
+        required: requiredCredits,
+        available,
+        needed: Math.max(0, requiredCredits - available),
+      });
+      setShowInsufficientModal(true);
+      return;
+    }
+
     setViewMode('generating');
     setGenerationError(null);
     setTimeRemaining(25);
@@ -804,6 +828,71 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
             onChangeStyle={handleChangeStyleAndRegenerate}
             onResize={handleResizeAndRegenerate}
           />
+        )}
+
+        {/* Insufficient Credits Modal */}
+        {showInsufficientModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in">
+            <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 text-center space-y-5 animate-in zoom-in-95">
+              <button
+                type="button"
+                onClick={() => setShowInsufficientModal(false)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center ring-8 ring-amber-500/5">
+                <Coins className="w-8 h-8" />
+              </div>
+
+              <div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                  Insufficient Credits
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  You need more credits to complete this high-definition AI post generation.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <div className="flex flex-col items-center">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Required</span>
+                  <span className="text-lg font-black text-slate-800 dark:text-slate-200 mt-0.5">{insufficientData.required}</span>
+                </div>
+                <div className="flex flex-col items-center border-x border-slate-200 dark:border-slate-800">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Available</span>
+                  <span className="text-lg font-black text-amber-600 dark:text-amber-400 mt-0.5">{insufficientData.available}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Needed</span>
+                  <span className="text-lg font-black text-rose-500 mt-0.5">+{insufficientData.needed}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInsufficientModal(false);
+                    router.push('/dashboard/billing');
+                  }}
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-brand-500/25 transition inline-flex items-center justify-center gap-2"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>Buy Credits</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowInsufficientModal(false)}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition"
+                >
+                  Maybe Later
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

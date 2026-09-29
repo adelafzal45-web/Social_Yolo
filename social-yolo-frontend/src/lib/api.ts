@@ -2,6 +2,14 @@ import {
   AuthResponse,
   BillingSummary,
   BrandProfile,
+  CreditPackage,
+  PriceCalculation,
+  OrderItem,
+  DiscountItem,
+  CreditCostItem,
+  AdminWalletItem,
+  AdminAuditLogItem,
+  AdminBillingStats,
   ExtractedBrandData,
   GeneratePostResponse,
   GuidedPostInput,
@@ -841,27 +849,339 @@ export async function getBillingSummaryApi(): Promise<BillingSummary> {
   return handleApiResponse(res, 'Failed to load billing summary');
 }
 
-export async function topupCreditsApi(
-  credits: number,
-  packTitle: string
-): Promise<{ success: boolean; credits: number; message: string }> {
+export async function getCreditPackagesApi(): Promise<CreditPackage[]> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/billing/packages', {
+      headers,
+      cache: 'no-store',
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/billing/packages`, {
+      headers,
+      cache: 'no-store',
+    });
+  }
+  return handleApiResponse(res, 'Failed to load credit packages');
+}
+
+export async function validateCouponApi(
+  packageId: string,
+  couponCode: string,
+): Promise<PriceCalculation> {
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   let res: Response;
   try {
-    res = await fetch('/api/proxy/billing/topup', {
+    res = await fetch('/api/proxy/billing/validate-coupon', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ credits, packTitle }),
+      body: JSON.stringify({ packageId, couponCode }),
     });
   } catch {
-    res = await fetch(`${getDirectBackendOrigin()}/api/billing/topup`, {
+    res = await fetch(`${getDirectBackendOrigin()}/api/billing/validate-coupon`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ credits, packTitle }),
+      body: JSON.stringify({ packageId, couponCode }),
     });
   }
+  return handleApiResponse(res, 'Failed to validate coupon code');
+}
 
-  return handleApiResponse(res, 'Failed to top up credits');
+export async function checkoutApi(
+  packageId: string,
+  couponCode?: string,
+  paymentMethod?: string,
+  idempotencyKey?: string,
+): Promise<{ success: boolean; creditsAdded: number; newBalance: number; order: OrderItem; message: string }> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/billing/checkout', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ packageId, couponCode, paymentMethod, idempotencyKey }),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/billing/checkout`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ packageId, couponCode, paymentMethod, idempotencyKey }),
+    });
+  }
+  return handleApiResponse(res, 'Failed to complete credit purchase');
+}
+
+/* ================= ADMIN BILLING APIS ================= */
+
+export async function getAdminBillingStatsApi(): Promise<AdminBillingStats> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/admin/billing/stats', { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/stats`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load admin billing stats');
+}
+
+export async function getAdminPackagesApi(): Promise<CreditPackage[]> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/admin/billing/packages', { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/packages`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load credit packages');
+}
+
+export async function createAdminPackageApi(dto: any): Promise<CreditPackage> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/admin/billing/packages', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/packages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  }
+  return handleApiResponse(res, 'Failed to create credit package');
+}
+
+export async function updateAdminPackageApi(id: string, dto: any): Promise<CreditPackage> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/packages/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/packages/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  }
+  return handleApiResponse(res, 'Failed to update credit package');
+}
+
+export async function deleteAdminPackageApi(id: string): Promise<void> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/packages/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/packages/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+  }
+  if (!res.ok) {
+    throw new Error('Failed to disable credit package');
+  }
+}
+
+export async function getAdminCostsApi(): Promise<CreditCostItem[]> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/admin/billing/costs', { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/costs`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load feature credit costs');
+}
+
+export async function updateAdminCostApi(
+  id: string,
+  creditCost: number,
+  reason: string,
+): Promise<CreditCostItem> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/costs/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ creditCost, reason }),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/costs/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ creditCost, reason }),
+    });
+  }
+  return handleApiResponse(res, 'Failed to update feature credit cost');
+}
+
+export async function getAdminDiscountsApi(): Promise<DiscountItem[]> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/admin/billing/discounts', { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/discounts`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load discounts');
+}
+
+export async function createAdminDiscountApi(dto: any): Promise<DiscountItem> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/admin/billing/discounts', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/discounts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  }
+  return handleApiResponse(res, 'Failed to create discount');
+}
+
+export async function updateAdminDiscountApi(id: string, dto: any): Promise<DiscountItem> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/discounts/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/discounts/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(dto),
+    });
+  }
+  return handleApiResponse(res, 'Failed to update discount');
+}
+
+export async function getAdminWalletsApi(
+  search?: string,
+  page = 1,
+  limit = 20,
+): Promise<{ items: AdminWalletItem[]; total: number; page: number; totalPages: number }> {
+  const headers = getAuthHeaders();
+  const query = new URLSearchParams();
+  if (search) query.append('search', search);
+  query.append('page', String(page));
+  query.append('limit', String(limit));
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/wallets?${query.toString()}`, { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/wallets?${query.toString()}`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load user wallets');
+}
+
+export async function adminAdjustWalletApi(
+  userId: string,
+  amount: number,
+  action: 'add' | 'remove' | 'refund',
+  reason: string,
+): Promise<{ success: boolean; wallet: any; message: string }> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/wallets/${userId}/adjust`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ amount, action, reason }),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/wallets/${userId}/adjust`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ amount, action, reason }),
+    });
+  }
+  return handleApiResponse(res, 'Failed to adjust user wallet');
+}
+
+export async function getAdminTransactionsApi(params?: {
+  userId?: string;
+  type?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{ items: any[]; total: number; page: number; totalPages: number }> {
+  const headers = getAuthHeaders();
+  const query = new URLSearchParams();
+  if (params?.userId) query.append('userId', params.userId);
+  if (params?.type) query.append('type', params.type);
+  if (params?.search) query.append('search', params.search);
+  if (params?.page) query.append('page', String(params.page));
+  if (params?.limit) query.append('limit', String(params.limit));
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/transactions?${query.toString()}`, { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/transactions?${query.toString()}`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load transactions');
+}
+
+export async function getAdminOrdersApi(params?: {
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{ items: OrderItem[]; total: number; page: number; totalPages: number }> {
+  const headers = getAuthHeaders();
+  const query = new URLSearchParams();
+  if (params?.status) query.append('status', params.status);
+  if (params?.search) query.append('search', params.search);
+  if (params?.page) query.append('page', String(params.page));
+  if (params?.limit) query.append('limit', String(params.limit));
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/orders?${query.toString()}`, { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/orders?${query.toString()}`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load orders');
+}
+
+export async function getAdminAuditLogsApi(params?: {
+  page?: number;
+  limit?: number;
+}): Promise<{ items: AdminAuditLogItem[]; total: number; page: number; totalPages: number }> {
+  const headers = getAuthHeaders();
+  const query = new URLSearchParams();
+  if (params?.page) query.append('page', String(params.page));
+  if (params?.limit) query.append('limit', String(params.limit));
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/admin/billing/audit-logs?${query.toString()}`, { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/admin/billing/audit-logs?${query.toString()}`, { headers, cache: 'no-store' });
+  }
+  return handleApiResponse(res, 'Failed to load audit logs');
 }
 
 /* ================= NOTIFICATIONS APIS ================= */

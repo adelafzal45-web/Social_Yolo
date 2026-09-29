@@ -127,15 +127,140 @@ export interface BrandProfile {
 
 export interface CreditTransaction {
   id: string;
+  type?: string;
   amount: number;
-  description: string;
+  balanceBefore?: number;
   balanceAfter: number;
+  description: string;
+  referenceId?: string | null;
+  createdBy?: string;
   createdAt: string;
+}
+
+export interface WalletData {
+  id: string;
+  currentBalance: number;
+  totalPurchased: number;
+  totalUsed: number;
+  totalRefunded: number;
+}
+
+export interface CreditPackage {
+  id: string;
+  name: string;
+  description: string | null;
+  credits: number;
+  price: number;
+  currency: string;
+  discountPercentage: number;
+  isActive: boolean;
+  isFeatured: boolean;
+  displayOrder: number;
+}
+
+export interface PriceCalculation {
+  packageId: string;
+  packageName: string;
+  credits: number;
+  currency: string;
+  basePrice: number;
+  discountCode: string | null;
+  discountType: 'PERCENTAGE' | 'FIXED' | null;
+  discountValue: number;
+  discountAmount: number;
+  finalPrice: number;
+  isValidCoupon: boolean;
+  couponMessage?: string;
+}
+
+export interface OrderItem {
+  id: string;
+  userId: string;
+  userEmail?: string;
+  userName?: string;
+  packageName?: string;
+  credits: number;
+  originalAmount: number;
+  discountAmount: number;
+  finalAmount: number;
+  currency: string;
+  couponCode: string | null;
+  paymentStatus: string;
+  orderStatus: string;
+  paymentReference: string | null;
+  createdAt: string;
+}
+
+export interface DiscountItem {
+  id: string;
+  code: string;
+  type: 'PERCENTAGE' | 'FIXED';
+  value: number;
+  minimumPurchase: number;
+  maximumDiscount: number | null;
+  applicablePackageIds: string[] | null;
+  usageLimit: number | null;
+  usageCount: number;
+  perUserLimit: number;
+  startsAt: string | null;
+  expiresAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreditCostItem {
+  id: string;
+  feature: string;
+  name: string;
+  creditCost: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface AdminWalletItem {
+  userId: string;
+  email: string;
+  name: string;
+  role: string;
+  plan: string;
+  isActive: boolean;
+  walletId: string;
+  currentBalance: number;
+  totalPurchased: number;
+  totalUsed: number;
+  totalRefunded: number;
+  createdAt: string;
+}
+
+export interface AdminAuditLogItem {
+  id: string;
+  adminId: string;
+  adminEmail?: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  oldValue: any;
+  newValue: any;
+  reason: string;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+export interface AdminBillingStats {
+  totalUsers: number;
+  activePackages: number;
+  activeDiscounts: number;
+  totalOrdersPaid: number;
+  totalRevenue: number;
+  totalCirculatingCredits: number;
+  totalCreditsConsumed: number;
+  totalCreditsPurchased: number;
 }
 
 export interface BillingSummary {
   plan: string;
   credits: number;
+  wallet: WalletData;
   monthlyAllowance: number;
   renewsAt: string;
   transactions: CreditTransaction[];
