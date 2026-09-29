@@ -31,8 +31,10 @@ export interface WizardFormData {
   // Step 2: Post Type
   postType: string;
   customPostType: string;
-  // Step 3: Idea / Description
+  // Step 3: Idea / Description, Headline & CTA
   idea: string;
+  headline?: string;
+  cta?: string;
   // Step 4: Audience
   audiences: string[];
   customAudience: string;
@@ -66,5 +68,6 @@ export interface FinalPostResult {
   cta: string;
   rating: number | null;
   isFavorite: boolean;
+  logoUrl?: string | null;
   variants?: FinalPostResult[];
 }

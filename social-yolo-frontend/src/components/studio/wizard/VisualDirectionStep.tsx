@@ -457,6 +457,9 @@ export function VisualDirectionStep({
                 <Check className="w-3 h-3 text-indigo-500" />
                 <span>Model photo attached &amp; active in art direction</span>
               </p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Exact face &amp; identity preserved with dynamic commercial action
+              </p>
             </div>
 
             <button

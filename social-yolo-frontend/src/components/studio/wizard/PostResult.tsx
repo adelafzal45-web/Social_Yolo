@@ -36,6 +36,133 @@ interface PostResultProps {
   onResize?: (newRatio: string) => void;
 }
 
+/**
+ * Composites the brand logo into the top-right corner of the downloaded image
+ * to guarantee physical brand logo inclusion on saved assets.
+ */
+async function compositeLogoOnImage(
+  imageUrl: string,
+  logoUrl?: string | null,
+): Promise<Blob> {
+  if (!logoUrl) {
+    const res = await fetch(imageUrl);
+    return await res.blob();
+  }
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+
+      if (!ctx) {
+        fetch(imageUrl)
+          .then((r) => r.blob())
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+
+      // Draw background creative
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const logoImg = new Image();
+      logoImg.crossOrigin = 'anonymous';
+
+      const finishWithCanvas = () => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else {
+            fetch(imageUrl)
+              .then((r) => r.blob())
+              .then(resolve)
+              .catch(reject);
+          }
+        }, 'image/png');
+      };
+
+      logoImg.onload = () => {
+        try {
+          const padding = Math.round(canvas.width * 0.04);
+          const maxLogoW = Math.round(canvas.width * 0.20);
+          const maxLogoH = Math.round(canvas.height * 0.10);
+
+          const ratio = (logoImg.width || 1) / (logoImg.height || 1);
+          let targetW = maxLogoW;
+          let targetH = targetW / ratio;
+
+          if (targetH > maxLogoH) {
+            targetH = maxLogoH;
+            targetW = targetH * ratio;
+          }
+
+          const badgePadX = Math.round(targetW * 0.12);
+          const badgePadY = Math.round(targetH * 0.12);
+          const badgeW = targetW + badgePadX * 2;
+          const badgeH = targetH + badgePadY * 2;
+          const badgeX = canvas.width - padding - badgeW;
+          const badgeY = padding;
+          const badgeRadius = Math.round(badgeH * 0.22);
+
+          ctx.save();
+          // Drop shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+          ctx.shadowBlur = Math.round(canvas.width * 0.016);
+          ctx.shadowOffsetY = Math.round(canvas.width * 0.005);
+
+          // Frosted white container pill
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, badgeRadius);
+          } else {
+            ctx.rect(badgeX, badgeY, badgeW, badgeH);
+          }
+          ctx.fill();
+
+          // Subtle hairline border
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+          ctx.lineWidth = Math.max(1, Math.round(canvas.width * 0.0015));
+          ctx.stroke();
+
+          // Draw logo inside badge
+          ctx.drawImage(
+            logoImg,
+            badgeX + badgePadX,
+            badgeY + badgePadY,
+            targetW,
+            targetH,
+          );
+          ctx.restore();
+
+          finishWithCanvas();
+        } catch {
+          finishWithCanvas();
+        }
+      };
+
+      logoImg.onerror = () => {
+        finishWithCanvas();
+      };
+
+      logoImg.src = logoUrl;
+    };
+
+    img.onerror = () => {
+      fetch(imageUrl)
+        .then((r) => r.blob())
+        .then(resolve)
+        .catch(reject);
+    };
+
+    img.src = imageUrl;
+  });
+}
+
 export function PostResult({
   post,
   onRatePost,
@@ -74,11 +201,10 @@ export function PostResult({
     setCtaEdit(currentPost.cta || 'Shop Now');
   }, [currentPost.postId, currentPost.id, currentPost.headline, currentPost.bodyCopy, currentPost.cta]);
 
-  // Handle single high-res image download
+  // Handle single high-res image download (composites logo if provided)
   const handleDownload = async () => {
     try {
-      const response = await fetch(currentPost.imageUrl);
-      const blob = await response.blob();
+      const blob = await compositeLogoOnImage(currentPost.imageUrl, currentPost.logoUrl);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -93,7 +219,7 @@ export function PostResult({
     }
   };
 
-  // Handle batch download of all variants
+  // Handle batch download of all variants (composites logo if provided)
   const handleDownloadAll = async () => {
     setIsDownloadingAll(true);
     toast.info(`Preparing download for all ${variantsList.length} variants...`, 'Batch Download');
@@ -101,8 +227,10 @@ export function PostResult({
       for (let i = 0; i < variantsList.length; i++) {
         const item = variantsList[i];
         try {
-          const response = await fetch(item.imageUrl);
-          const blob = await response.blob();
+          const blob = await compositeLogoOnImage(
+            item.imageUrl,
+            item.logoUrl || currentPost.logoUrl,
+          );
           const url = window.URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
@@ -299,6 +427,19 @@ export function PostResult({
                 alt="Generated social creative"
                 className="w-full h-full object-cover select-none"
               />
+
+              {/* Brand Logo Overlay on Post Canvas (when user provides logo) */}
+              {currentPost.logoUrl && (
+                <div className="absolute top-4 right-4 z-10 pointer-events-none drop-shadow-md">
+                  <div className="px-2.5 py-1.5 rounded-xl bg-white/90 dark:bg-black/80 backdrop-blur-md border border-white/40 dark:border-white/10 shadow-lg flex items-center justify-center">
+                    <img
+                      src={currentPost.logoUrl}
+                      alt="Brand Logo"
+                      className="max-h-8 max-w-[84px] sm:max-h-10 sm:max-w-[100px] w-auto h-auto object-contain"
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Hover Overlay Controls */}
               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-[2px]">
@@ -689,12 +830,26 @@ export function PostResult({
           onClick={() => setIsLightboxOpen(false)}
           className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
         >
-          <div className="relative max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl">
+          <div
+            className="relative max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <img
               src={currentPost.imageUrl}
               alt="High resolution generated post"
               className="w-full h-full object-contain"
             />
+            {currentPost.logoUrl && (
+              <div className="absolute top-6 right-6 z-10 pointer-events-none drop-shadow-lg">
+                <div className="px-3 py-2 rounded-xl bg-white/90 dark:bg-black/80 backdrop-blur-md border border-white/40 dark:border-white/10 shadow-xl flex items-center justify-center">
+                  <img
+                    src={currentPost.logoUrl}
+                    alt="Brand Logo"
+                    className="max-h-12 max-w-[120px] w-auto h-auto object-contain"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

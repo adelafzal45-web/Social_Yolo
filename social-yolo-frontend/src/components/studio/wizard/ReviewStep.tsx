@@ -93,10 +93,24 @@ export function ReviewStep({
     },
     {
       step: 3,
-      title: 'Post Idea',
+      title: 'Post Idea & Copy',
       icon: FileText,
       value: formData.idea || 'No topic description specified',
       isQuote: true,
+      extra: (formData.headline || formData.cta) ? (
+        <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+          {formData.headline && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+              <span className="text-slate-400 font-normal">Headline:</span> “{formData.headline}”
+            </span>
+          )}
+          {formData.cta && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800/60">
+              <span className="text-slate-400 font-normal">CTA:</span> {formData.cta}
+            </span>
+          )}
+        </div>
+      ) : undefined,
     },
     {
       step: 4,

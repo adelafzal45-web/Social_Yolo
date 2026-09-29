@@ -80,6 +80,8 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
     postType: 'promotional',
     customPostType: '',
     idea: initialPrompt || '',
+    headline: '',
+    cta: '',
     audiences: ['Customers'],
     customAudience: '',
     style: 'luxury',
@@ -418,6 +420,8 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
       const creativePost = await createGuidedPost({
         productName: formData.brand.brandName || 'Brand',
         prompt: formData.idea,
+        headline: formData.headline?.trim() || undefined,
+        cta: formData.cta?.trim() || undefined,
         platform: formData.platform,
         aspectRatio: formData.aspectRatio,
         style: formData.style,
@@ -448,7 +452,7 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
             ? `Product Reference Photos: Exactly ${formData.productImages.length} product photos are attached for visual reference and deep product understanding. In the final post, showcase ONE single hero product presentation with maximum clarity and impact (do NOT paste or collage all photos into one post; use all photos as reference to accurately represent the single hero product).`
             : '',
           formData.modelFile
-            ? 'Hero Model Reference: CRITICAL - The uploaded model photo depicts the exact person who must be the model in the post. Replicate this exact individual with 100% identity fidelity (facial structure, eyes, nose, lips, hair, skin tone, and authentic human features). Staged elegantly interacting with or showcasing the featured product.'
+            ? 'Hero Model Reference & Action Mandate: CRITICAL - The uploaded model photo depicts the exact person who must star as the model in the post. Her/his face MUST look identical to the provided photo (exact same facial structure, eyes, nose, lips, jawline, skin tone, and hair). Dynamically change her/his ACTION, GESTURE, and POSE to interact naturally with the product, but keep the model person and face strictly identical.'
             : '',
         ]
           .filter(Boolean)
@@ -470,14 +474,15 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
             platform: v.platform || formData.platform,
             aspectRatio: v.aspectRatio || formData.aspectRatio,
             imageUrl: v.imageUrl || imgUrl,
-            headline: v.headline || 'Elevate Your Standard',
+            headline: v.headline || creativePost.headline || formData.headline || 'Elevate Your Standard',
             bodyCopy:
               v.bodyCopy ||
               formData.idea ||
               'Designed with precision to captivate your audience.',
-            cta: v.cta || 'Shop Now',
+            cta: v.cta || creativePost.cta || formData.cta || 'Shop Now',
             rating: v.rating || null,
             isFavorite: v.isFavorite || false,
+            logoUrl: v.logoUrl || creativePost.logoUrl || formData.brand.logoUrl || null,
           }))
         : undefined;
 
@@ -487,14 +492,15 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         platform: formData.platform,
         aspectRatio: formData.aspectRatio,
         imageUrl: imgUrl,
-        headline: creativePost.headline || 'Elevate Your Standard',
+        headline: creativePost.headline || formData.headline || 'Elevate Your Standard',
         bodyCopy:
           creativePost.bodyCopy ||
           formData.idea ||
           'Designed with precision to captivate your audience.',
-        cta: creativePost.cta || 'Shop Now',
+        cta: creativePost.cta || formData.cta || 'Shop Now',
         rating: creativePost.rating || null,
         isFavorite: creativePost.isFavorite || false,
+        logoUrl: creativePost.logoUrl || formData.brand.logoUrl || null,
         variants: mappedVariants,
       };
 
@@ -586,6 +592,8 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
     setFormData((prev) => ({
       ...prev,
       idea: '',
+      headline: '',
+      cta: '',
       productFile: null,
       rawOriginalUrl: null,
       cutoutUrl: null,
@@ -675,6 +683,14 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
                 idea={formData.idea}
                 onChangeIdea={(val) =>
                   setFormData((prev) => ({ ...prev, idea: val }))
+                }
+                headline={formData.headline}
+                onChangeHeadline={(val) =>
+                  setFormData((prev) => ({ ...prev, headline: val }))
+                }
+                cta={formData.cta}
+                onChangeCta={(val) =>
+                  setFormData((prev) => ({ ...prev, cta: val }))
                 }
               />
             )}
