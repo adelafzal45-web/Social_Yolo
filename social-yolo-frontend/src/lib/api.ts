@@ -28,16 +28,38 @@ let _inMemoryAuthToken: string | null = null;
 let _inMemoryUserId: string | null = null;
 
 export function getAuthToken(): string | null {
-  return _inMemoryAuthToken;
+  if (_inMemoryAuthToken) return _inMemoryAuthToken;
+  if (typeof document !== 'undefined') {
+    const match = document.cookie.match(/(?:^|; )access_token=([^;]*)/);
+    if (match) {
+      try {
+        _inMemoryAuthToken = decodeURIComponent(match[1]);
+        return _inMemoryAuthToken;
+      } catch {
+        return match[1];
+      }
+    }
+  }
+  return null;
 }
 
 export function setAuthToken(token: string | null): void {
   _inMemoryAuthToken = token ? token.trim() : null;
+  if (typeof document !== 'undefined') {
+    if (token) {
+      document.cookie = `access_token=${encodeURIComponent(token.trim())}; path=/; max-age=604800; SameSite=Lax`;
+    } else {
+      document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
+    }
+  }
 }
 
 export function clearAuthToken(): void {
   _inMemoryAuthToken = null;
   _inMemoryUserId = null;
+  if (typeof document !== 'undefined') {
+    document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
+  }
 }
 
 export function getStoredUserId(): string {

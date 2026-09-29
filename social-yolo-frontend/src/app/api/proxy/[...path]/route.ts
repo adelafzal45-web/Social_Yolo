@@ -2,71 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-
-interface CacheEntry {
-  status: number;
-  contentType: string;
-  data: ArrayBuffer;
-  expiresAt: number;
-}
-
-// In-memory proxy cache for fast repeat GET requests
-const proxyCache = new Map<string, CacheEntry>();
-
-function getCacheKey(req: NextRequest, path: string, queryString: string): string {
-  const userId = req.headers.get('x-user-id') || 'anon';
-  const auth = req.headers.get('authorization') ? 'auth' : 'noauth';
-  return `${userId}:${auth}:${path}${queryString}`;
-}
-
-function invalidateProxyCache(prefix?: string) {
-  if (!prefix) {
-    proxyCache.clear();
-    return;
-  }
-  proxyCache.forEach((_, key) => {
-    if (key.includes(prefix)) {
-      proxyCache.delete(key);
-    }
-  });
-}
-
+/**
+ * Pure zero-leak HTTP reverse proxy from Next.js to NestJS backend.
+ * Bypasses CORS in development and eliminates port exposure in production.
+ * Strictly no-cache to guarantee tenant isolation across concurrent user sessions.
+ */
 async function forwardRequest(req: NextRequest, pathParts: string[]) {
   const effectiveParts = pathParts[0] === 'api' ? pathParts.slice(1) : pathParts;
   const path = effectiveParts.join('/');
   const searchParams = req.nextUrl.searchParams.toString();
   const queryString = searchParams ? `?${searchParams}` : '';
-  const isGet = req.method === 'GET';
 
-  // Check cache for GET requests
-  const cacheKey = getCacheKey(req, path, queryString);
-  if (isGet) {
-    const cached = proxyCache.get(cacheKey);
-    if (cached && Date.now() < cached.expiresAt) {
-      return new NextResponse(cached.data.slice(0), {
-        status: cached.status,
-        headers: {
-          'Content-Type': cached.contentType,
-          'X-Proxy-Cache': 'HIT',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-  } else {
-    // On any mutation (POST/PUT/PATCH/DELETE), evict related caches
-    const rootEntity = effectiveParts[0] || '';
-    invalidateProxyCache(rootEntity);
-    if (rootEntity === 'posts' || rootEntity === 'billing' || rootEntity === 'auth') {
-      invalidateProxyCache('billing');
-      invalidateProxyCache('posts');
-      invalidateProxyCache('auth');
-    }
-  }
-
-  // Forward custom user, auth, and cookie headers
+  // Forward authorization and session cookies
   const authHeader = req.headers.get('authorization');
   const cookieHeader = req.headers.get('cookie');
-  const userId = req.headers.get('x-user-id');
   const contentType = req.headers.get('content-type');
   const accept = req.headers.get('accept');
 
@@ -86,7 +35,6 @@ async function forwardRequest(req: NextRequest, pathParts: string[]) {
     const headers: Record<string, string> = {};
     if (authHeader) headers['authorization'] = authHeader;
     if (cookieHeader) headers['cookie'] = cookieHeader;
-    if (userId) headers['x-user-id'] = userId;
     if (contentType) headers['content-type'] = contentType;
     if (accept) headers['accept'] = accept;
 
@@ -110,28 +58,9 @@ async function forwardRequest(req: NextRequest, pathParts: string[]) {
     const resContentType = response.headers.get('content-type') || 'application/json';
     const data = await response.arrayBuffer();
 
-    // Cache successful GET responses (TTL 15 seconds), excluding sensitive user session endpoints
-    const skipCache = ['auth', 'billing', 'notifications'].includes(effectiveParts[0]);
-    if (isGet && response.status === 200 && !skipCache) {
-      proxyCache.set(cacheKey, {
-        status: response.status,
-        contentType: resContentType,
-        data: data.slice(0),
-        expiresAt: Date.now() + 15_000,
-      });
-
-      // Prune old cache entries
-      if (proxyCache.size > 200) {
-        const now = Date.now();
-        proxyCache.forEach((entry, k) => {
-          if (now > entry.expiresAt) proxyCache.delete(k);
-        });
-      }
-    }
-
     const outHeaders: Record<string, string> = {
       'Content-Type': resContentType,
-      'X-Proxy-Cache': 'MISS',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
     };
     const setCookie = response.headers.get('set-cookie');
     if (setCookie) {
