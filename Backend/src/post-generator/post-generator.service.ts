@@ -100,6 +100,7 @@ export class PostGeneratorService {
     userId: string | null = null,
     logo?: UploadedFile,
     modelFile?: UploadedFile,
+    refFiles?: UploadedFile[],
   ): Promise<PostResponseDto> {
     const files = Array.isArray(fileOrFiles)
       ? fileOrFiles
@@ -113,6 +114,7 @@ export class PostGeneratorService {
       userId,
       logo,
       modelFile,
+      refFiles,
     );
   }
 
@@ -126,6 +128,7 @@ export class PostGeneratorService {
     userId: string | null = null,
     logo?: UploadedFile,
     modelFile?: UploadedFile,
+    refFiles?: UploadedFile[],
   ): Promise<PostResponseDto> {
     const variationsCount = Math.max(
       1,
@@ -157,6 +160,16 @@ export class PostGeneratorService {
       let fontBody = dto.fontBody;
       let tone = dto.tone;
 
+      // Scraped brand DNA. These used to have no home in the pipeline — the
+      // frontend crammed the tagline and description into `additionalInstructions`
+      // where they were truncated to 300 chars and lost. They are now first-class
+      // brief fields so the art director can reason about the actual business.
+      let brandTagline = (dto as CreateGuidedPostDto).brandTagline;
+      let brandDescription = (dto as CreateGuidedPostDto).brandDescription;
+      let brandWebsiteUrl = (dto as CreateGuidedPostDto).brandWebsiteUrl;
+      let niche = (dto as CreateGuidedPostDto).niche || dto.category;
+      let brandColors = (dto as CreateGuidedPostDto).brandColors;
+
       // Contact details for the artwork. Sanitised to plain phone/email shapes
       // so a scraped value can never smuggle instructions into the prompt.
       const contactEmail = sanitizeContactEmail(dto.contactEmail);
@@ -178,6 +191,14 @@ export class PostGeneratorService {
             fontHeading = fontHeading || activeBrand.fontHeading;
             fontBody = fontBody || activeBrand.fontBody;
             tone = tone || activeBrand.tone;
+            // A saved brand profile is a cached copy of the same scrape, so it
+            // is a legitimate fallback source for the identity fields.
+            niche = niche || activeBrand.niche || undefined;
+            brandTagline = brandTagline || activeBrand.tagline || undefined;
+            brandDescription =
+              brandDescription || activeBrand.description || undefined;
+            brandWebsiteUrl =
+              brandWebsiteUrl || activeBrand.websiteUrl || undefined;
           }
         } catch (err) {
           this.logger.warn(`Could not load brand profile: ${err}`);
@@ -280,6 +301,41 @@ export class PostGeneratorService {
         } catch (err) {
           this.logger.warn(`Failed to process model reference image: ${err}`);
         }
+      }
+
+      // 5b. Ingest the user's own reference screenshots / moodboards.
+      // These are NOT background-removed and NOT treated as product shots —
+      // they are pure style direction, each paired with an optional note.
+      const inspirationRefs: Array<{
+        base64: string;
+        mimeType: string;
+        note?: string;
+      }> = [];
+      if (refFiles && refFiles.length > 0) {
+        const notes = parseReferenceNotes(
+          (dto as CreateGuidedPostDto).referenceNotes,
+        );
+        for (let i = 0; i < refFiles.length; i += 1) {
+          try {
+            const buffer = await readFileBuffer(refFiles[i]);
+            inspirationRefs.push({
+              base64: buffer.toString('base64'),
+              mimeType: refFiles[i].mimetype || 'image/png',
+              note: (notes[i] || '').trim() || undefined,
+            });
+          } catch (err) {
+            this.logger.warn(
+              `Skipping user reference image ${i + 1}: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+          }
+        }
+        this.logger.log(
+          `Attached ${inspirationRefs.length} user reference image(s), ${
+            inspirationRefs.filter((r) => r.note).length
+          } with written notes.`,
+        );
       }
 
       // 6. Process product image(s) through background-removal pipeline
@@ -426,7 +482,7 @@ export class PostGeneratorService {
           prompt: dto.prompt,
           productName: dto.productName,
           category: dto.category,
-          niche: dto.niche,
+          niche,
           content: dto.content,
           colorScheme: dto.colorScheme,
           font: fontHeading,
@@ -449,7 +505,13 @@ export class PostGeneratorService {
           primaryColor,
           secondaryColor,
           accentColor,
+          brandColors,
           brandName,
+          // Scraped brand identity — this is what makes the post look like THIS
+          // business rather than generic stock.
+          brandTagline,
+          brandDescription,
+          brandWebsiteUrl,
           additionalInstructions: dto.additionalInstructions
             ? `${dto.additionalInstructions}. Variation ${variantIndex + 1} of ${variationsCount}.`
             : variationsCount > 1
@@ -476,6 +538,12 @@ export class PostGeneratorService {
           onImageTextFont: dto.onImageTextFont,
           onImageTextPlacement: dto.onImageTextPlacement || 'auto',
           onImageTextColor: dto.onImageTextColor,
+          // The user's own screenshots, addressed by 1-based index so the
+          // prompt can point at each one individually.
+          inspirationImages: inspirationRefs.map((r, i) => ({
+            index: i + 1,
+            note: r.note,
+          })),
         };
 
         // Two-stage prompt planning
@@ -538,6 +606,9 @@ export class PostGeneratorService {
               logoBase64,
               logoMimeType: logoMimeType || logo?.mimetype || 'image/png',
               referenceImages: visualRefs,
+              // User screenshots outrank the RAG anchors, so they are attached
+              // ahead of them inside `generatePostImage`.
+              inspirationImages: inspirationRefs,
               aspectRatio: dto.aspectRatio || '1:1',
               postSize: dto.postSize,
             };
@@ -781,6 +852,9 @@ export class PostGeneratorService {
       brandColors: dto.brandColors,
       layoutPreference: dto.layoutPreference,
       brandName: dto.brandName,
+      brandTagline: dto.brandTagline,
+      brandDescription: dto.brandDescription,
+      brandWebsiteUrl: dto.brandWebsiteUrl,
       additionalInstructions: dto.additionalInstructions,
       hasSubjectImage: false,
       subjectImagesCount: 0,
@@ -1448,6 +1522,21 @@ function buildRetrievalQuery(dto: GeneratePostDto | CreateGuidedPostDto): string
           .join(', ');
   if (palette) parts.push(`palette: ${palette}`);
 
+  // Feed the scraped business identity into the RAG query too. Retrieving by
+  // "solid wood dining tables" finds furniture references; retrieving by
+  // "furniture company" alone does not.
+  const brandDescription = (dto as CreateGuidedPostDto).brandDescription;
+  if (brandDescription) parts.push(`business: ${brandDescription}`);
+
+  const brandTagline = (dto as CreateGuidedPostDto).brandTagline;
+  if (brandTagline) parts.push(`tagline: ${brandTagline}`);
+
+  const brandWebsiteUrl = (dto as CreateGuidedPostDto).brandWebsiteUrl;
+  if (brandWebsiteUrl) parts.push(`website: ${brandWebsiteUrl}`);
+
+  const brandName = (dto as CreateGuidedPostDto).brandName;
+  if (brandName) parts.push(`brand: ${brandName}`);
+
   const layout = (dto.layoutPreference || '').trim();
   if (layout) parts.push(`layout: ${layout}`);
 
@@ -1455,5 +1544,24 @@ function buildRetrievalQuery(dto: GeneratePostDto | CreateGuidedPostDto): string
   if (extras) parts.push(extras);
 
   return parts.join('. ').slice(0, 1200) || 'general commercial social media campaign';
+}
+
+/**
+ * Parses the `referenceNotes` multipart field into a plain string array.
+ *
+ * The client sends a JSON array index-aligned with the uploaded `refImage`
+ * files. A malformed or missing value must never fail a generation, so every
+ * failure path degrades to "no notes" rather than throwing.
+ */
+function parseReferenceNotes(raw?: string): string[] {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((v) => (typeof v === 'string' ? v : String(v ?? '')));
+  } catch {
+    // Tolerate a plain newline-separated fallback.
+    return raw.split('\n');
+  }
 }
 

@@ -610,9 +610,17 @@ export async function createGuidedPost(input: GuidedPostInput): Promise<Post> {
   if (input.primaryColor) fd.append('primaryColor', input.primaryColor);
   if (input.secondaryColor) fd.append('secondaryColor', input.secondaryColor);
   if (input.accentColor) fd.append('accentColor', input.accentColor);
+  if (input.brandColors && input.brandColors.length > 0) {
+    for (const c of input.brandColors) fd.append('brandColors', c);
+  }
   if (input.layoutPreference) fd.append('layoutPreference', input.layoutPreference);
   if (input.brandProfileId) fd.append('brandProfileId', input.brandProfileId);
   if (input.brandName) fd.append('brandName', input.brandName);
+  // Scraped brand DNA — dedicated fields so the backend BRAND DNA block keeps
+  // them at full fidelity rather than truncating them into a free-text blob.
+  if (input.brandTagline) fd.append('brandTagline', input.brandTagline);
+  if (input.brandDescription) fd.append('brandDescription', input.brandDescription);
+  if (input.brandWebsiteUrl) fd.append('brandWebsiteUrl', input.brandWebsiteUrl);
   if (input.additionalInstructions) fd.append('additionalInstructions', input.additionalInstructions);
   if (input.niche) fd.append('niche', input.niche);
   if (input.variationsCount) {
@@ -645,6 +653,22 @@ export async function createGuidedPost(input: GuidedPostInput): Promise<Post> {
   }
   if (input.logo) fd.append('logo', input.logo, input.logo.name);
   if (input.model) fd.append('model', input.model, input.model.name);
+
+  // User reference screenshots / moodboards. The notes travel as a single
+  // JSON array that is index-aligned with the files, so the backend can pair
+  // each instruction with its image without relying on multipart field order.
+  if (input.refImages && input.refImages.length > 0) {
+    for (const f of input.refImages) {
+      fd.append('refImage', f, f.name);
+    }
+    const notes = input.referenceNotes ?? [];
+    const aligned = input.refImages.map((_, i) => notes[i] ?? '');
+    // Only send the field when at least one note carries real content, so a
+    // notes-less moodboard stays a clean, minimal request.
+    if (aligned.some((n) => n.trim().length > 0)) {
+      fd.append('referenceNotes', JSON.stringify(aligned));
+    }
+  }
 
   const headers = getAuthHeaders();
   let res: Response;

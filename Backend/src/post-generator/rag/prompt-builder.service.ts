@@ -105,6 +105,18 @@ export interface DesignBriefContext {
   layoutPreference?: string;
   niche?: string;
   brandName?: string;
+  /**
+   * Brand identity recovered from the customer's own website by the
+   * extract-from-url scraper. These are the fields that turn a generic post
+   * into a post that actually looks like *this* business — they are emitted as
+   * their own authoritative BRAND DNA block rather than being flattened into
+   * `additionalInstructions`, which used to truncate them to 300 characters and
+   * strip every scrapable signal out of the prompt.
+   */
+  brandTagline?: string;
+  brandDescription?: string;
+  /** Absolute URL of the customer's website, e.g. https://adress.com. */
+  brandWebsiteUrl?: string;
   additionalInstructions?: string;
 
   /* ------------------------------------------------------------------ */
@@ -125,6 +137,22 @@ export interface DesignBriefContext {
   onImageTextPlacement?: string;
   /** Optional colour hint for `onImageText`. */
   onImageTextColor?: string;
+
+  /* ------------------------------------------------------------------ */
+  /* USER-SUPPLIED STYLE REFERENCES                                      */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Screenshots / moodboards the user uploaded as "make it look like this".
+   * The images themselves are attached to the image model; only their notes
+   * (and ordering) are carried here so the prompt can address each one.
+   */
+  inspirationImages?: Array<{
+    /** Index in the attachment order (1-based, for human readability). */
+    index: number;
+    /** The user's optional note about this reference. */
+    note?: string;
+  }>;
 }
 
 /**
@@ -147,7 +175,15 @@ export type PostCreativeArchetype =
   | 'event_keynote'
   | 'educational_infographic'
   | 'brand_announcement'
-  | 'social_lifestyle';
+  | 'social_lifestyle'
+  /**
+   * A website, web app, online store, dashboard or digital product being
+   * shown on a device. Without this archetype a brief like "our website is
+   * live now" fell through to `commercial_product`, whose art direction talks
+   * about "brushed anodized metal" and "organic drops" — which is exactly how
+   * you end up photographing a wedge of cheese instead of a laptop.
+   */
+  | 'digital_showcase';
 
 /** Maps a canvas aspect ratio to concrete, actionable layout instructions. */
 const ASPECT_RATIO_DIRECTIVES: Record<string, string> = {
@@ -174,6 +210,16 @@ export class PromptBuilderService {
   private detectArchetype(ctx: DesignBriefContext): PostCreativeArchetype {
     const raw =
       `${ctx.occasion || ''} ${ctx.layoutPreference || ''} ${ctx.prompt || ''} ${ctx.category || ''} ${ctx.additionalInstructions || ''}`.toLowerCase();
+
+    // ── Digital / website briefs ────────────────────────────────────────
+    // This runs FIRST on purpose. A brief like "our website is live now" also
+    // contains "launch"-flavoured words, so checking the announcement branch
+    // first would hand it a pedestal-and-spotlight brief with no device in it.
+    // Detecting it up front is what turns the post into a laptop/phone
+    // actually showing the brand's own site in the brand's own palette.
+    if (this.isDigitalSubject(raw, ctx)) {
+      return 'digital_showcase';
+    }
 
     if (
       ctx.hasModelImage ||
@@ -241,6 +287,109 @@ export class PromptBuilderService {
     return 'commercial_product';
   }
 
+  /**
+   * True when the post is really about a *website, app or digital product*
+   * rather than a physical thing.
+   *
+   * Two signals are combined, because either one alone is unreliable:
+   *
+   *  1. **Explicit digital vocabulary** in the brief — "website", "web app",
+   *     "landing page", "online store", "download the app", "is live now".
+   *     Phrases like "is live", "just launched", "now open" only count when
+   *     they sit next to a digital noun, otherwise "the shop is now open" would
+   *     be mistaken for a website.
+   *  2. **A known web presence** — if the brand scraper recovered a website URL
+   *     AND the user selected a digital-leaning visual direction, the post is
+   *     about showing that site even if the wording is vague.
+   *
+   * An uploaded product photo or model photo vetoes the archetype: if the user
+   * handed us a physical product to hero, they want a product shot, not a
+   * laptop.
+   */
+  private isDigitalSubject(raw: string, ctx: DesignBriefContext): boolean {
+    // A real uploaded asset always wins — it is an unambiguous statement of
+    // what the hero subject is.
+    if (ctx.hasSubjectImage || ctx.hasModelImage) {
+      return false;
+    }
+
+    const DIGITAL_NOUNS = [
+      'website',
+      'web site',
+      'webpage',
+      'web page',
+      'web app',
+      'webapp',
+      'landing page',
+      'homepage',
+      'home page',
+      'online store',
+      'e-commerce',
+      'ecommerce',
+      'e store',
+      'mobile app',
+      'our app',
+      'the app',
+      'application',
+      'dashboard',
+      'portal',
+      'platform',
+      'software',
+      'saas',
+      'b2b saas',
+      'download',
+      'app store',
+      'play store',
+      'browser',
+      'link in bio',
+      'shop online',
+      'order online',
+      'book online',
+      'menu online',
+      'ui',
+      'ux',
+      'website launch',
+    ];
+
+    const hasDigitalNoun = DIGITAL_NOUNS.some((term) => raw.includes(term));
+
+    // "is live" / "now open" only imply a website when a digital noun or a web
+    // presence is already in play.
+    const LIVE_PHRASES = [
+      'is live',
+      'are live',
+      'now live',
+      'just went live',
+      'went live',
+      'go live',
+      'going live',
+      'now open',
+      'just launched',
+      'now launching',
+      'is online',
+      'now online',
+      'we are up',
+    ];
+    const hasLivePhrase = LIVE_PHRASES.some((term) => raw.includes(term));
+
+    if (hasDigitalNoun) {
+      return true;
+    }
+    if (hasLivePhrase && (ctx.brandWebsiteUrl || ctx.niche || ctx.category)) {
+      return true;
+    }
+
+    // Visual direction "ai_decide" with a known web presence is still ambiguous
+    // on its own, so only the explicit digital layout choices count here.
+    const DIGITAL_DIRECTIONS = ['website', 'web', 'app', 'digital', 'ui_mockup'];
+    const direction = (ctx.layoutPreference || '').toLowerCase();
+    if (ctx.brandWebsiteUrl && DIGITAL_DIRECTIONS.some((d) => direction.includes(d))) {
+      return true;
+    }
+
+    return false;
+  }
+
   /** Tailored high-end art direction guidelines per archetype. */
   private getArchetypeGuidelines(archetype: PostCreativeArchetype): string {
     switch (archetype) {
@@ -300,6 +449,17 @@ export class PromptBuilderService {
           '- Seamlessly blends lifestyle storytelling with brand identity.'
         );
 
+      case 'digital_showcase':
+        return (
+          'ARCHETYPE: PREMIUM DIGITAL PRODUCT & WEBSITE SHOWCASE.\n' +
+          '- HERO SUBJECT: a real, physically believable device — an open laptop, a desktop monitor, a tablet or a phone — angled at roughly 20-35 degrees so the screen is fully legible and clearly the focal point of the frame. The device is the product. Never substitute a physical object for it.\n' +
+          '- THE SCREEN IS THE BRAND: render a clean, realistic, modern web page filling the display — a crisp top navigation bar, a strong hero banner, well-spaced blocks of body content and a clear call-to-action button. The page must be styled in the exact brand colours and typography supplied in the BRAND DNA block so it is instantly recognisable as THIS business.\n' +
+          '- The attached logo belongs in the page header of that on-screen website, rendered small and crisp. Never distort, recolour or watermark it.\n' +
+          '- STAGING: a real, aspirational desk or workspace — warm wood or matte stone, soft daylight from one side, subtle depth of field falling off behind the device. Real contact shadow beneath the device so it is grounded, never floating.\n' +
+          '- LIGHTING & OPTICS: soft window key light with a gentle screen-glow bounce onto the surface, 50mm f/1.4 lens, tack-sharp focus on the screen so the interface reads, creamy falloff on the surroundings. Photorealistic — this is a photograph of a real device, not a 3D render.\n' +
+          '- Do NOT add any other text anywhere on the canvas outside the supplied on-canvas string. The only lettering the screen itself carries is the brand logo and minimal, believable UI labels.'
+        );
+
       case 'commercial_product':
       default:
         return (
@@ -313,10 +473,111 @@ export class PromptBuilderService {
   }
 
   /**
+   * ╔═════════════════════════════════════════════════════════════════════╗
+   * ║ BLOCK: BRAND DNA — the scraped website, promoted to first-class     ║
+   * ╚═════════════════════════════════════════════════════════════════════╝
+   *
+   * THIS IS THE FIX FOR "it fetched the logo and colours but the post ignored
+   * them".
+   *
+   * Previously the scraped brand identity had no home in the prompt. The
+   * tagline and description were concatenated into `additionalInstructions` by
+   * the frontend and then truncated to 300 characters, so by the time the image
+   * model saw them they were a fragment of a sentence buried in a "CLIENT
+   * OVERRIDE" line. The logo was the only thing that genuinely arrived, and
+   * only as a small corner watermark.
+   *
+   * Now every scrapable signal is emitted as its own labelled, non-truncated
+   * block, and the palette is stated as a *rule* ("this exact hex, on these
+   * exact surfaces") rather than a suggestion. When a logo is attached the
+   * block also states where it belongs, which is what stops the model from
+   * slapping it in a random corner or ignoring it entirely.
+   *
+   * Returns an empty array when there is genuinely no brand data, so prompts
+   * for unbranded users stay exactly as lean as before.
+   */
+  private buildBrandDnaBlock(ctx: DesignBriefContext): string[] {
+    const brandName = sanitizePromptText(ctx.brandName, 100).trim();
+    const niche = sanitizePromptText(ctx.niche || ctx.category, 90).trim();
+    const tagline = sanitizePromptText(ctx.brandTagline, 160).trim();
+    const description = sanitizePromptText(ctx.brandDescription, 400).trim();
+    const website = sanitizePromptText(ctx.brandWebsiteUrl, 200).trim();
+    const tone = sanitizePromptText(ctx.tone, 80).trim();
+
+    // The palette is the single most important scrapable signal. Normalise it
+    // so the renderer always sees concrete hex values, never a vague name.
+    const palette = (
+      ctx.brandColors && ctx.brandColors.length > 0
+        ? ctx.brandColors
+        : [ctx.primaryColor, ctx.secondaryColor, ctx.accentColor]
+    )
+      .map((c) => sanitizePromptText(c, 20).trim())
+      .filter((c): c is string => Boolean(c))
+      .slice(0, 4);
+
+    if (
+      !brandName &&
+      !niche &&
+      !tagline &&
+      !description &&
+      !website &&
+      palette.length === 0
+    ) {
+      return [];
+    }
+
+    const lines: string[] = [
+      '',
+      '### BRAND DNA (scraped from the customer\'s own website — this is the brand the post belongs to):',
+    ];
+
+    if (brandName) lines.push(`- Brand: ${brandName}`);
+    if (niche) lines.push(`- Industry / niche: ${niche}`);
+    if (description) lines.push(`- What this business does: ${description}`);
+    if (tagline) {
+      lines.push(
+        `- Brand tagline (for your understanding of their voice — it is CONTEXT, do NOT print it unless it is the supplied on-canvas string): "${tagline}"`,
+      );
+    }
+    if (website) lines.push(`- Their website: ${website}`);
+    if (tone) lines.push(`- Brand voice: ${tone}`);
+
+    if (palette.length > 0) {
+      lines.push(
+        `- AUTHORITATIVE BRAND PALETTE: ${palette.join(', ')}`,
+        '  PALETTE RULE: these exact colours are the brand. Use them for the dominant surfaces, the accent details and any on-screen interface. Do not introduce competing hues, and do not "improve" or shift these tones.',
+      );
+    }
+
+    const headingFont = sanitizePromptText(
+      ctx.fontHeading || ctx.font || '',
+      60,
+    ).trim();
+    const bodyFont = sanitizePromptText(ctx.fontBody || '', 60).trim();
+    if (headingFont || bodyFont) {
+      lines.push(
+        `- BRAND TYPOGRAPHY: headings in ${headingFont || 'a refined display serif'}, body/UI in ${bodyFont || 'a clean modern sans-serif'}. Use these typefaces on any rendered interface or headline.`,
+      );
+    }
+
+    if (ctx.hasLogo && ctx.showLogo !== false) {
+      lines.push(
+        '- BRAND LOGO: the attached logo is their official mark. It must appear exactly once, unwarped, at full brand colour. If this post shows a website or app on a device, place the logo inside that on-screen page header. Otherwise place it in a quiet corner band of the canvas. Never stretch, rotate, outline, drop-shadow it into a watermark, or repeat it.',
+      );
+    }
+
+    lines.push(
+      'APPLY THIS: the finished post must be unmistakably recognisable as belonging to THIS business — same palette, same typography, same visual register. A generic stock-looking result is a failed result.',
+    );
+
+    return lines;
+  }
+
+  /**
    * The exhaustive negative prompt. Image models weight the tail of the prompt
    * heavily, so this is always the second-to-last block.
    */
-  private buildNegativePrompt(): string {
+  private buildNegativePrompt(archetype?: PostCreativeArchetype): string {
     return [
       'NEGATIVE PROMPT — NONE of the following may appear:',
       'gibberish or misspelled lettering; duplicated words; repeated headlines; random alphabet soup; stray or floating text; warped or distorted glyphs;',
@@ -327,7 +588,13 @@ export class PromptBuilderService {
       'invented lettering of any kind — if no on-canvas text was supplied, the image must contain zero letters;',
       'a caption strip, subtitle bar, or descriptive sentence along the bottom edge of the image;',
       'text placed over a face, over eyes, over hands, or crossing the silhouette of the model or the product;',
-      'watermarks; stock-photo logo overlays; fake UI chrome; fake QR codes; fake legal fine print; invented brand names; invented URLs; hashtags or @handles;',
+      'watermarks; stock-photo logo overlays; fake QR codes; fake legal fine print; invented brand names; invented URLs; hashtags or @handles;',
+      // "fake UI chrome" is banned for physical-product posts, but it is the
+      // entire subject for a digital_showcase post — so it is emitted
+      // conditionally rather than unconditionally.
+      ...(archetype === 'digital_showcase'
+        ? []
+        : ['fake UI chrome; a screen, monitor or device in the frame;']),
       'duplicate subjects; the same product or person rendered twice; split-screen collages of several uploaded photos;',
       'distorted hands; six fingers; melted facial features; crossed or misaligned eyes; plastic waxy skin; mannequin-like faces;',
       'blurry subjects; motion blur; heavy noise; visible JPEG artefacts; banding; oversharpening halos; chromatic aberration;',
@@ -336,6 +603,18 @@ export class PromptBuilderService {
       'plastic-looking CGI product shots; text that is upside down, mirrored, or cropped at the canvas edge;',
       'off-brand colours; muddy colour mixing; oversaturated neon clashing with the brand palette;',
       'anything that looks AI-generated: melted details, inconsistent reflections, impossible geometry, floating objects.',
+      // Archetype-specific bans. "fake UI chrome" above is fatal for a website
+      // post — the whole point of a digital_showcase render IS the interface —
+      // so the generic ban is swapped for a precise one that only forbids
+      // gibberish inside the screen, never the screen itself.
+      ...(archetype === 'digital_showcase'
+        ? [
+            'CRITICAL for this brief: NO food, NO cheese, NO fruit, NO clothing, NO cosmetic product, NO packaged grocery item and NO generic physical merchandise as the hero subject — if the post is about a website or app, the hero is the DEVICE, never an unrelated product that happens to match the brand colours;',
+            'a blank, black, white or mirrored screen; a screen showing lorem ipsum, placeholder boxes, "@handle" or random keyboard mash;',
+            'a device with no screen content, a device shot from an angle where the screen is unreadable, or a screen so small the page is illegible;',
+            'more than one device unless the composition deliberately mirrors one; floating devices; a device that is visibly pasted onto the background;',
+          ]
+        : []),
     ].join(' ');
   }
 
@@ -734,6 +1013,59 @@ export class PromptBuilderService {
   }
 
   /**
+   * BLOCK: user-supplied style references.
+   *
+   * The user can attach screenshots or moodboards with an optional note each
+   * ("make the background like this", "borrow this colour grade"). This block
+   * turns that into an addressable list so the model can act on each one
+   * individually instead of averaging them into mush.
+   *
+   * The guard rails matter more here than for RAG references: these are images
+   * the user found *somewhere else*, so they frequently contain someone else's
+   * product, logo and typography. We want the craft, never the identity.
+   */
+  private buildUserReferenceBlock(
+    refs: NonNullable<DesignBriefContext['inspirationImages']>,
+  ): string[] {
+    const withNotes = refs.filter((r) => (r.note || '').trim().length > 0);
+    const withoutNotes = refs.filter((r) => (r.note || '').trim().length === 0);
+
+    const lines: string[] = [
+      '',
+      '### USER REFERENCE IMAGES (highest-priority creative direction):',
+      `${refs.length} image${refs.length > 1 ? 's are' : ' is'} attached as the client’s own visual direction. ${refs.length > 1 ? 'These OVERRIDE' : 'This OVERRIDES'} any automatically-retrieved style reference on every point of conflict — if the client asked for it, it wins.`,
+      '',
+      'HOW TO USE THEM:',
+      '- ABSORB the transferable craft: palette and colour temperature, lighting quality and direction, background treatment, compositional structure, depth, surface texture, mood and finish.',
+      '- Apply the client’s note for that image as a specific, literal instruction — it is a direct order, not a suggestion.',
+      '',
+      'HARD LIMITS (non-negotiable):',
+      '- NEVER copy the subject matter, product, person, packaging, brand name, logo, wordmark, or any readable text that appears in a reference image.',
+      '- NEVER reproduce a reference as a literal copy or paste any part of it into the frame; this is inspiration, not a collage.',
+      '- Only the DESIGN LANGUAGE transfers. The subject of this post comes from the product/model/logo attachments described above.',
+    ];
+
+    refs.forEach((ref, i) => {
+      const n = ref.index || i + 1;
+      const note = (ref.note || '').trim();
+      lines.push(
+        note
+          ? `  [U${n}] CLIENT REFERENCE ${n} — the user says: "${sanitizePromptText(note, 300)}" Follow that instruction precisely for this image.`
+          : `  [U${n}] CLIENT REFERENCE ${n} — no note was given, so absorb its overall look, palette and mood as the target aesthetic.`,
+      );
+    });
+
+    if (withNotes.length > 0 && withoutNotes.length > 0) {
+      lines.push(
+        '',
+        `Note that ${withNotes.length} of the references carry a written instruction and ${withoutNotes.length} do not — for the ones without a note, infer the intent from the image itself rather than assuming the note applies to them.`,
+      );
+    }
+
+    return lines;
+  }
+
+  /**
    * BLOCK: attachment specifications — explains what each uploaded image is
    * and exactly how the model is allowed to use it.
    */
@@ -770,8 +1102,23 @@ lines.push(
         'BRAND LOGO — the user has EXPLICITLY DISABLED logo placement for this post. An image is attached but it is the old logo: DO NOT reproduce it, DO NOT trace it, DO NOT place it anywhere, and DO NOT invent a replacement mark, wordmark, monogram or badge. This creative must be completely logo-free.',
       );
     } else if (ctx.hasLogo) {
+      // For a digital showcase the logo belongs INSIDE the on-screen page
+      // header. Telling the model to also drop it "top-right of the canvas"
+      // produced two competing instructions and it usually did both.
+      const isDigital = this.detectArchetype(ctx) === 'digital_showcase';
       lines.push(
-        'BRAND LOGO — one attachment is the official brand logo. Reproduce it UNCHANGED and UNWARPED at ONE PLACE ONLY. Preserve its exact proportions, colours and lettering; never stretch, rotate, recolour, outline, drop-shadow into a watermark, repeat or scatter it. Place it in the quietest corner band the subject leaves free — normally top-right — with generous padding and maximum contrast against the background. If the background there is busy, add a soft scrim behind it rather than moving it over the subject.',
+        isDigital
+          ? 'BRAND LOGO — one attachment is the official brand logo. Reproduce it UNCHANGED and UNWARPED at ONE PLACE ONLY: inside the header of the website/app shown on the device screen, rendered small, crisp and at full brand colour. Do NOT also place a second copy in a corner of the canvas. Never stretch, rotate, recolour, outline or drop-shadow it into a watermark.'
+          : 'BRAND LOGO — one attachment is the official brand logo. Reproduce it UNCHANGED and UNWARPED at ONE PLACE ONLY. Preserve its exact proportions, colours and lettering; never stretch, rotate, recolour, outline, drop-shadow into a watermark, repeat or scatter it. Place it in the quietest corner band the subject leaves free — normally top-right — with generous padding and maximum contrast against the background. If the background there is busy, add a soft scrim behind it rather than moving it over the subject.',
+      );
+    }
+
+    // User-supplied references come before the auto-retrieved ones to mirror
+    // the physical attachment order in the Gemini call.
+    const userRefs = ctx.inspirationImages || [];
+    if (userRefs.length > 0) {
+      lines.push(
+        ...this.buildUserReferenceBlock(userRefs),
       );
     }
 
@@ -880,6 +1227,13 @@ lines.push(
         : [ctx.primaryColor, ctx.secondaryColor, ctx.accentColor].filter(Boolean).join(', ') || ctx.colorScheme;
     if (palette) lines.push(`- Brand Color Palette (authoritative): ${palette}`);
 
+    // The full scraped brand identity, untruncated and explicitly labelled.
+    // The one-line palette above is a summary; this block is the *reasoning*
+    // context the art director needs to invent a subject that belongs to this
+    // specific business (e.g. "a laptop showing THEIR site" instead of "a
+    // laptop showing some generic page").
+    lines.push(...this.buildBrandDnaBlock(ctx));
+
     if (ctx.fontHeading || ctx.font || ctx.fontBody) {
       lines.push(`- Typography: ${ctx.fontHeading || ctx.font || 'Editorial Serif / Modern Neo-Grotesque'} for headlines, ${ctx.fontBody || 'clean sans-serif'} for secondary text`);
     }
@@ -895,9 +1249,43 @@ lines.push(
     } else if (ctx.hasLogo) {
       lines.push('- Attached Brand Logo: YES (must appear exactly once, in a quiet corner band, unwarped and uncoloured).');
     }
+    // User references are the client's own direction and outrank everything the
+    // retriever surfaced, so they are announced before the RAG dossier.
+    const userRefs = ctx.inspirationImages || [];
+    if (userRefs.length > 0) {
+      lines.push(
+        `- Attached USER REFERENCE IMAGES (the client's own screenshots/moodboards): ${userRefs.length}. These are the highest-priority visual direction and OVERRIDE the retrieved knowledge-base references on any point of conflict.`,
+      );
+      userRefs.forEach((ref, i) => {
+        const note = (ref.note || '').trim();
+        lines.push(
+          note
+            ? `    * User reference ${ref.index || i + 1} — CLIENT INSTRUCTION: "${sanitizePromptText(note, 300)}" (follow it literally; take only the design language, never their subject/logo/text)`
+            : `    * User reference ${ref.index || i + 1} — no note given; take its overall palette, lighting and mood as the target aesthetic (never its subject/logo/text)`,
+        );
+      });
+    }
+
     if ((ctx.referenceImageCount || 0) > 0) lines.push(`- Attached Style Reference Images from the knowledge base: ${ctx.referenceImageCount} (style anchors only — never copy their subject or text).`);
 
     lines.push(...this.buildReferenceDossier(references));
+
+    // ── SUBJECT COMMITMENT ──────────────────────────────────────────────
+    // Without this, the planner defaults to a safe, generic studio product
+    // shot no matter what the brief actually says. Forcing it to name ONE
+    // literal, physical hero subject — derived from the brief AND the brand
+    // DNA — is what stops "our website is live now" from becoming a wedge of
+    // cheese on a seamless backdrop.
+    lines.push(
+      '',
+      '### STEP ZERO — COMMIT TO A LITERAL HERO SUBJECT (do this before writing anything else):',
+      'The single most important decision in this plan is WHAT IS PHYSICALLY IN THE FRAME. Decide it explicitly, then build the whole composition around it.',
+      '1. Read the core concept and name, in your own mind, the ONE physical object or scene a viewer would photograph to communicate this exact message. Be literal and specific — "an open aluminium laptop on a walnut desk", not "a modern product shot".',
+      '2. Cross-check that choice against the BRAND DNA block. If the brand sells furniture, the device/room/prop you choose must suit that industry. If the brief is about the website or app, the hero is the DEVICE plus the on-screen page — never a stand-in product that merely matches the brand colours.',
+      '3. Never default to a generic studio pedestal, seamless backdrop or floating cube because you could not decide. A wrong-but-specific subject is a recoverable error; an anonymous one is a wasted generation.',
+      `4. This campaign is classified as ${archetype.toUpperCase()}. Honour that classification's art direction exactly.`,
+      '5. State your chosen hero subject in plain words in the composition notes so the decision is auditable.',
+    );
 
     lines.push(
       '',
@@ -919,6 +1307,7 @@ lines.push(
       '### OUTPUT — return ONLY valid JSON, no markdown fences, no commentary:',
       '{',
       '  "image_generation_prompt": "<the 60-110 word renderer prompt described above>",',
+      '  "hero_subject": "<the ONE literal physical object/scene you committed to, in under 12 words>",',
       '  "art_direction": {',
       '    "color_palette": ["Primary", "Secondary", "Accent"],',
       '    "typography": "font character, weights, case, and where each text element sits",',
@@ -965,12 +1354,30 @@ lines.push(
     references: RetrievedReference[] = [],
   ): string {
     const lines: string[] = [];
+    const archetype = this.detectArchetype(ctx);
 
     // 1. Creative direction
     lines.push(
       '=== 1. CREATIVE DIRECTION ===',
       planPrompt.trim(),
       '',
+    );
+
+    // 1b. BRAND DNA — the scraped website identity, restated for the renderer.
+    // The planner saw this too, but the renderer is a separate model call with
+    // no memory of the planner prompt, so the brand rules must be repeated here
+    // or the palette simply will not be applied.
+    lines.push(...this.buildBrandDnaBlock(ctx));
+
+    // 1c. ARCHETYPE CONTRACT — also repeated from the planner stage.
+    // The planner is only allowed 60-110 words, so the class-level art
+    // direction (which device, which lighting, which staging) can easily be
+    // compressed out of its paragraph. Re-asserting it here guarantees the
+    // renderer still knows this is a website showcase and not a food shoot.
+    lines.push(
+      '',
+      `### CAMPAIGN ARCHETYPE (authoritative): ${archetype.toUpperCase()}`,
+      this.getArchetypeGuidelines(archetype),
     );
 
     // 2. Attachment specifications
@@ -998,7 +1405,11 @@ lines.push(
     }
 
     // 6. Negative prompt
-    lines.push('', '=== 6. NEGATIVE PROMPT ===', this.buildNegativePrompt());
+    lines.push(
+      '',
+      '=== 6. NEGATIVE PROMPT ===',
+      this.buildNegativePrompt(archetype),
+    );
 
     // 7. Production standards
     lines.push(
@@ -1105,11 +1516,17 @@ lines.push(
       `CAMPAIGN ARCHETYPE: ${archetype.toUpperCase()}`,
       this.getArchetypeGuidelines(archetype),
       '',
+      'HERO SUBJECT: decide the ONE literal physical object or scene that best communicates the message above, and build the entire composition around it. Be specific and concrete. Never default to a generic pedestal, seamless backdrop or floating cube because you could not decide.',
+      '',
       `Design aesthetic: ${sanitizePromptText(ctx.style || 'luxury', 60)}, with master commercial colour grading.`,
       ctx.backgroundMode
         ? `Staging & background: ${sanitizePromptText(ctx.backgroundMode, 60)}.`
         : 'Staging: an immaculate, deliberately art-directed environment that supports the subject.',
     ];
+
+    // Same authoritative brand block the two-stage path emits, so a planner
+    // failure can never silently drop the scraped brand identity.
+    lines.push(...this.buildBrandDnaBlock(ctx));
 
     if (ctx.targetAudience) {
       lines.push(`Crafted for: ${sanitizePromptText(ctx.targetAudience, 150)}.`);
@@ -1133,7 +1550,11 @@ lines.push(
       );
     }
 
-    lines.push('', '=== 6. NEGATIVE PROMPT ===', this.buildNegativePrompt());
+    lines.push(
+      '',
+      '=== 6. NEGATIVE PROMPT ===',
+      this.buildNegativePrompt(archetype),
+    );
     lines.push(
       '',
       '=== 7. PRODUCTION STANDARDS ===',
@@ -1202,23 +1623,69 @@ lines.push(
       archetypePrefix = 'Luxury commercial promotional advertisement for';
     } else if (archetype === 'social_lifestyle') {
       archetypePrefix = 'Authentic cinematic lifestyle photography of';
+    } else if (archetype === 'digital_showcase') {
+      // This is the sentence that stops the free-tier fallback from rendering a
+      // cheese wedge for "our website is live now".
+      archetypePrefix =
+        'Photorealistic commercial photograph of a real open laptop on a premium desk, screen clearly showing a clean modern website with a navigation bar, hero banner and call-to-action button, screen styled in the brand colors';
     }
 
     // Only the single strongest reference is worth spending prompt budget on.
     const topRef = references[0];
 
+    // The scraped brand identity, compressed for a short-attention engine.
+    const brandLine = this.buildCompactBrandLine(ctx);
+
     return [
       `${archetypePrefix} ${subject}${brand}, ${bg}.`,
       `${style} aesthetic, ${colors}.`,
+      brandLine,
       topRef
         ? `match the lighting quality, palette temperature and compositional energy of this approved reference style: ${truncate(topRef.contentText, 140)}.`
         : '',
       textOverlay,
       'Pristine Profoto studio lighting, soft key light, gentle specular highlights, razor-sharp focus on subject, cinematic depth of field, balanced negative space, 8k resolution, authentic editorial photography.',
-      'Negative prompt: duplicate subjects, repeated words, distorted letters, floating gibberish, blurry, noisy, low resolution, amateur, cartoon, anime, illustration, 3D render.',
+      archetype === 'digital_showcase'
+        ? 'Negative prompt: food, cheese, fruit, cosmetic products, generic merchandise, blank or black screen, lorem ipsum UI, floating device, blurry, low resolution, cartoon, anime, illustration, 3D render.'
+        : 'Negative prompt: duplicate subjects, repeated words, distorted letters, floating gibberish, blurry, noisy, low resolution, amateur, cartoon, anime, illustration, 3D render.',
     ]
       .filter(Boolean)
       .join(' ');
+  }
+
+  /**
+   * A one-line compression of the BRAND DNA block for engines with a very
+   * short effective attention window (Pollinations). Same signals, no bloat.
+   */
+  private buildCompactBrandLine(ctx: DesignBriefContext): string {
+    const parts: string[] = [];
+    const palette = (
+      ctx.brandColors && ctx.brandColors.length > 0
+        ? ctx.brandColors
+        : [ctx.primaryColor, ctx.secondaryColor, ctx.accentColor]
+    )
+      .map((c) => sanitizePromptText(c, 20).trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (palette.length > 0) {
+      parts.push(`strictly on-brand palette ${palette.join(', ')}`);
+    }
+    const niche = sanitizePromptText(ctx.niche || ctx.category, 60).trim();
+    if (niche) {
+      parts.push(`a ${niche} brand`);
+    }
+    const desc = sanitizePromptText(ctx.brandDescription, 120).trim();
+    if (desc) {
+      parts.push(`business context: ${desc}`);
+    }
+    if (ctx.hasLogo && ctx.showLogo !== false) {
+      parts.push('their logo appears once, small and unwarped');
+    }
+
+    return parts.length > 0
+      ? `BRAND DNA: ${parts.join('; ')}. The post must be recognisably theirs, not generic stock.`
+      : '';
   }
 }
 

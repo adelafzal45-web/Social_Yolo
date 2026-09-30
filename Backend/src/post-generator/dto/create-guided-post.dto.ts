@@ -295,6 +295,52 @@ export class CreateGuidedPostDto {
   @IsOptional()
   brandName?: string;
 
+  /* ------------------------------------------------------------------ */
+  /* BRAND DNA — scraped from the customer's website                      */
+  /* ------------------------------------------------------------------ */
+
+  @ApiProperty({
+    required: false,
+    description:
+      "The brand's tagline, scraped from their website. Passed to the prompt as " +
+      'brand-voice context. It is never typeset onto the image unless it is also ' +
+      'sent as onImageText.',
+    example: 'Furniture crafted for modern living',
+    maxLength: 200,
+  })
+  @IsString()
+  @MaxLength(200)
+  @IsOptional()
+  brandTagline?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'One or two sentences describing what the business actually does, scraped ' +
+      'from their website. This is what lets the art director invent a hero ' +
+      "subject that belongs to THIS company (e.g. a laptop showing their site) " +
+      'instead of a generic stock product.',
+    example: 'A furniture company selling solid wood dining tables and chairs.',
+    maxLength: 500,
+  })
+  @IsString()
+  @MaxLength(500)
+  @IsOptional()
+  brandDescription?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "Absolute URL of the brand's website. Combined with a digital brief it " +
+      'switches the campaign to the website/device showcase art direction.',
+    example: 'https://adress.com',
+    maxLength: 300,
+  })
+  @IsString()
+  @MaxLength(300)
+  @IsOptional()
+  brandWebsiteUrl?: string;
+
   @ApiProperty({
     required: false,
     description: 'Additional creative instructions or constraints',
@@ -451,4 +497,26 @@ export class CreateGuidedPostDto {
   })
   @IsOptional()
   contactPlacement?: string;
+
+  /* ------------------------------------------------------------------ */
+  /* USER REFERENCE IMAGES (screenshots / moodboards)                    */
+  /* ------------------------------------------------------------------ */
+
+  @ApiProperty({
+    required: false,
+    type: String,
+    description:
+      'JSON array of OPTIONAL per-image notes for the uploaded user reference ' +
+      'images, index-aligned with the `refImage` files. Each entry tells the AI ' +
+      'what to take from that screenshot (e.g. "match this background treatment"). ' +
+      'Use an empty string for a reference with no note. ' +
+      'Example: ["match this colour grade", ""]',
+    example: '["match this colour grade", ""]',
+  })
+  @IsString()
+  @MaxLength(4000, {
+    message: 'referenceNotes must be 4000 characters or fewer',
+  })
+  @IsOptional()
+  referenceNotes?: string;
 }

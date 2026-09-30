@@ -97,6 +97,15 @@ export interface GuidedPostInput {
   brandName?: string;
   additionalInstructions?: string;
   niche?: string;
+  /**
+   * Scraped brand DNA from the customer's website. These are first-class brief
+   * fields on the backend so the art director can design a subject that belongs
+   * to this specific business, instead of the identity being flattened into
+   * `additionalInstructions` and truncated away.
+   */
+  brandTagline?: string;
+  brandDescription?: string;
+  brandWebsiteUrl?: string;
   variationIndex?: number;
   totalVariations?: number;
   variationsCount?: number;
@@ -120,10 +129,25 @@ export interface GuidedPostInput {
   contactEmail?: string;
   contactPhone?: string;
   contactPlacement?: OnImageTextPlacement;
+  /**
+   * User reference screenshots / moodboards ("make it look like this").
+   * Sent as `refImage` parts; `referenceNotes` carries the per-image notes.
+   */
+  refImages?: File[] | null;
+  referenceNotes?: string[];
   file?: File | null;
   files?: File[] | null;
   logo?: File | null;
   model?: File | null;
+}
+
+/** One user-supplied reference image plus its optional instruction. */
+export interface UserReferenceImage {
+  id: string;
+  file: File;
+  previewUrl: string;
+  /** Optional note describing what to take from this reference. */
+  note: string;
 }
 
 /** Placement slots for the on-image text. `auto` = let the AI decide. */

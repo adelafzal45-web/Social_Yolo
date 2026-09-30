@@ -23,7 +23,11 @@ import {
   editPostImage,
   approvePost,
 } from '@/lib/api';
-import { BrandProfile, OnImageTextPlacement } from '@/lib/types';
+import {
+  BrandProfile,
+  OnImageTextPlacement,
+  UserReferenceImage,
+} from '@/lib/types';
 
 // Wizard Step Components
 import { StepIndicator } from './wizard/StepIndicator';
@@ -86,11 +90,16 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
     },
     postType: 'promotional',
     customPostType: '',
+    // `idea` is retained only to pre-fill the single post message from a deep
+    // link. It is never rendered as its own input and is never sent to the API —
+    // Step 3 has exactly one field, bound to `onImageText`.
     idea: initialPrompt || '',
-    // The only text that is ever rendered on the artwork. Empty = letter-free.
-    onImageText: '',
+    // The single post input: art direction AND on-canvas copy.
+    onImageText: initialPrompt || '',
     onImageTextFont: 'Bold Condensed Sans',
     onImageTextPlacement: 'auto' as OnImageTextPlacement,
+    // User reference screenshots / moodboards (highest-priority direction)
+    referenceImages: [],
     audiences: ['Customers'],
     customAudience: '',
     style: 'luxury',
@@ -329,6 +338,71 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
     }));
   };
 
+  /* ------------------------------------------------------------------ */
+  /* User reference images (screenshots / moodboards)                     */
+  /* ------------------------------------------------------------------ */
+
+  const MAX_REFERENCE_IMAGES = 4;
+  const ALLOWED_REF_MIME = ['image/png', 'image/jpeg', 'image/webp'];
+
+  const handleAddReferenceImages = (files: File[]) => {
+    const accepted = files.filter((f) => ALLOWED_REF_MIME.includes(f.type));
+    if (accepted.length < files.length) {
+      toast.error(
+        'References must be PNG, JPG or WebP images.',
+        'Unsupported File',
+      );
+    }
+    if (accepted.length === 0) return;
+
+    setFormData((prev) => {
+      const room = MAX_REFERENCE_IMAGES - prev.referenceImages.length;
+      if (room <= 0) {
+        toast.error(
+          `You can attach up to ${MAX_REFERENCE_IMAGES} reference images.`,
+          'Limit Reached',
+        );
+        return prev;
+      }
+      if (accepted.length > room) {
+        toast.info(
+          `Only ${room} more reference image${room > 1 ? 's' : ''} can be added.`,
+          'Limit Reached',
+        );
+      }
+      const additions: UserReferenceImage[] = accepted
+        .slice(0, room)
+        .map((file) => ({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          file,
+          previewUrl: URL.createObjectURL(file),
+          note: '',
+        }));
+      return { ...prev, referenceImages: [...prev.referenceImages, ...additions] };
+    });
+  };
+
+  const handleRemoveReferenceImage = (id: string) => {
+    setFormData((prev) => {
+      const target = prev.referenceImages.find((r) => r.id === id);
+      // Revoke the object URL so the blob is not leaked in memory.
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return {
+        ...prev,
+        referenceImages: prev.referenceImages.filter((r) => r.id !== id),
+      };
+    });
+  };
+
+  const handleChangeReferenceNote = (id: string, note: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      referenceImages: prev.referenceImages.map((r) =>
+        r.id === id ? { ...r, note } : r,
+      ),
+    }));
+  };
+
   // Step validation
   const canProceed = () => {
     switch (currentStep) {
@@ -342,8 +416,9 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         }
         return Boolean(formData.postType);
       case 3:
-        // Step 3: Idea / Description
-        return Boolean(formData.idea.trim().length >= 3);
+        // Step 3: the single post message. This is the only required creative
+        // input now that the separate description textarea is gone.
+        return Boolean(formData.onImageText.trim().length >= 3);
       case 4:
         // Step 4: Audience (can have at least one or default)
         return true;
@@ -417,26 +492,38 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
 
       const creativePost = await createGuidedPost({
         productName: formData.brand.brandName || 'Brand',
-        prompt: formData.idea,
+        // THE SINGLE INPUT. `onImageText` is now both the art direction the AI
+        // reasons about and the string typeset on the creative, so it is sent
+        // as the prompt as well. Previously `formData.idea` was a second,
+        // separate textarea and this is what collapsed the two into one.
+        prompt: formData.onImageText.trim(),
         platform: formData.platform,
         aspectRatio: formData.aspectRatio,
         style: formData.style,
         occasion: postTypeLabel,
         backgroundMode: formData.backgroundMode,
         targetAudience: audienceString,
-        // NOTE: the idea is deliberately NOT sent as keyMessage. That field used
-        // to be marked "MUST appear verbatim" in the prompt, which is what made
-        // the user's own prompt get printed on the creative. Only the explicit
-        // onImageText below is ever rendered.
         tone: formData.brand.tone || formData.style,
         fontHeading: formData.brand.fontHeading || undefined,
         fontBody: formData.brand.fontBody || undefined,
         primaryColor: formData.brand.primaryColor || undefined,
         secondaryColor: formData.brand.secondaryColor || undefined,
         accentColor: formData.brand.accentColor || undefined,
+        brandColors: [
+          formData.brand.primaryColor,
+          formData.brand.secondaryColor,
+          formData.brand.accentColor,
+        ].filter((c): c is string => Boolean(c)),
         brandProfileId: formData.brand.brandProfileId || undefined,
         brandName: formData.brand.brandName || undefined,
         niche: formData.brand.niche || undefined,
+        // Scraped brand DNA — sent as first-class brief fields so the backend
+        // can build the authoritative BRAND DNA prompt block. Previously these
+        // were crammed into additionalInstructions and truncated to 300 chars,
+        // which is why the scraped identity never influenced the artwork.
+        brandTagline: formData.brand.tagline || undefined,
+        brandDescription: formData.brand.description || undefined,
+        brandWebsiteUrl: formData.brand.websiteUrl || undefined,
         layoutPreference: formData.visualDirection,
         variationsCount: formData.variationsCount,
         // On-image text overlay (optional; empty = no lettering at all)
@@ -447,6 +534,13 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         onImageTextPlacement: formData.onImageText.trim()
           ? formData.onImageTextPlacement
           : undefined,
+        // User reference screenshots + their optional per-image notes.
+        // Files go as `refImage` parts; notes ride along index-aligned.
+        refImages:
+          formData.referenceImages.length > 0
+            ? formData.referenceImages.map((r) => r.file)
+            : null,
+        referenceNotes: formData.referenceImages.map((r) => r.note),
         file: heroSubjectFile,
         files: productFilesList.length > 0 ? productFilesList : (formData.productFile ? [formData.productFile] : null),
         model: formData.modelFile || null,
@@ -469,8 +563,11 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         contactPhone: formData.brand.contactPhone?.trim() || undefined,
         contactPlacement: formData.brand.contactPlacement || 'auto',
         additionalInstructions: [
-          formData.brand.description ? `Brand Context: ${formData.brand.description}` : '',
-          formData.brand.tagline ? `Tagline: ${formData.brand.tagline}` : '',
+          // NOTE: the brand description and tagline are deliberately NOT
+          // repeated here. They are sent as brandDescription / brandTagline so
+          // the backend can place them in the authoritative BRAND DNA block.
+          // Re-adding them here used to duplicate them inside a 400-char
+          // "CLIENT OVERRIDE" string, where they competed with asset rules.
           `Visual Focus: ${formData.visualDirection}`,
           formData.productImages.length > 1
             ? `Product Reference Photos: Exactly ${formData.productImages.length} product photos are attached for visual reference and deep product understanding. In the final post, showcase ONE single hero product presentation with maximum clarity and impact (do NOT paste or collage all photos into one post; use all photos as reference to accurately represent the single hero product).`
@@ -501,7 +598,7 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
             headline: v.headline || 'Elevate Your Standard',
             bodyCopy:
               v.bodyCopy ||
-              formData.idea ||
+              formData.onImageText ||
               'Designed with precision to captivate your audience.',
             cta: v.cta || 'Shop Now',
             rating: v.rating || null,
@@ -521,7 +618,7 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         headline: creativePost.headline || 'Elevate Your Standard',
         bodyCopy:
           creativePost.bodyCopy ||
-          formData.idea ||
+          formData.onImageText ||
           'Designed with precision to captivate your audience.',
         cta: creativePost.cta || 'Shop Now',
         rating: creativePost.rating || null,
@@ -623,6 +720,7 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
       onImageText: '',
       onImageTextFont: 'Bold Condensed Sans',
       onImageTextPlacement: 'auto',
+      referenceImages: [],
       productFile: null,
       rawOriginalUrl: null,
       cutoutUrl: null,
@@ -795,10 +893,6 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
             {/* STEP 3: Idea & Topic */}
             {currentStep === 3 && (
               <IdeaStep
-                idea={formData.idea}
-                onChangeIdea={(val) =>
-                  setFormData((prev) => ({ ...prev, idea: val }))
-                }
                 onImageText={formData.onImageText}
                 onChangeOnImageText={(val) =>
                   setFormData((prev) => ({ ...prev, onImageText: val }))
@@ -815,6 +909,11 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
                   }))
                 }
                 brandFont={formData.brand.fontHeading || undefined}
+                hasBrandWebsite={Boolean(formData.brand.websiteUrl?.trim())}
+                referenceImages={formData.referenceImages}
+                onAddReferenceImages={handleAddReferenceImages}
+                onRemoveReferenceImage={handleRemoveReferenceImage}
+                onChangeReferenceNote={handleChangeReferenceNote}
               />
             )}
 

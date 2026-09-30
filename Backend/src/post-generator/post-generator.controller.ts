@@ -96,6 +96,8 @@ export class PostGeneratorController {
         { name: 'files', maxCount: 6 },
         { name: 'logo', maxCount: 1 },
         { name: 'model', maxCount: 1 },
+        // User reference screenshots / moodboards (style direction).
+        { name: 'refImage', maxCount: 4 },
       ],
       { limits: { fileSize: MAX_PHOTO_BYTES } },
     ),
@@ -121,6 +123,7 @@ export class PostGeneratorController {
           files?: UploadType[];
           logo?: UploadType[];
           model?: UploadType[];
+          refImage?: UploadType[];
         }
       | undefined,
     @Body() dto: CreateGuidedPostDto,
@@ -163,6 +166,9 @@ export class PostGeneratorController {
       userId,
       files?.logo?.[0],
       modelFile,
+      files?.refImage && files.refImage.length > 0
+        ? files.refImage
+        : undefined,
     );
   }
 

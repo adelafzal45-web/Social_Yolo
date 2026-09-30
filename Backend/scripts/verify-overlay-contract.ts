@@ -135,5 +135,59 @@ console.log('\n=== SCENARIO 5: edit prompt keeps the text contract ===');
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+console.log('\n=== SCENARIO 6: user reference images with per-image notes ===');
+{
+  const prompt = builder.buildFinalPrompt(
+    {
+      prompt: 'autumn cafe launch',
+      productName: 'Cold Brew',
+      onImageText: 'Autumn Menu',
+      inspirationImages: [
+        { index: 1, note: 'match this background treatment exactly' },
+        { index: 2 },
+        { index: 3, note: 'borrow this warm colour grade' },
+      ],
+    },
+    [],
+    'gemini',
+  );
+  const block = section(prompt, '### USER REFERENCE IMAGES');
+  console.log(block);
+  console.log('');
+  check('block is emitted', block !== '(section missing)');
+  check('quotes the first note', /U1\].*match this background treatment exactly/.test(block));
+  check('quotes the third note', /U3\].*borrow this warm colour grade/.test(block));
+  check('handles the note-less reference', /U2\].*no note was given/.test(block));
+  check('flags the mixed note situation', /2 of the references carry a written instruction and 1 do not/.test(block));
+  check('ranks user refs above RAG', /OVERRIDE/.test(block));
+  check('forbids copying their subject/logo/text', /NEVER copy the subject matter/.test(block));
+  check('still enforces the single-string text contract', /\[T1\] "Autumn Menu"/.test(prompt));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n=== SCENARIO 7: user refs reach the Stage-1 planner too ===');
+{
+  const planner = builder.buildPlannerPrompt(
+    {
+      prompt: 'autumn cafe launch',
+      inspirationImages: [{ index: 1, note: 'match this background treatment' }],
+    },
+    [],
+  );
+  check('planner sees the count', /USER REFERENCE IMAGES.*: 1/.test(planner));
+  check('planner sees the instruction', /CLIENT INSTRUCTION: "match this background treatment"/.test(planner));
+  check('planner marks them as overriding', /OVERRIDE the retrieved knowledge-base references/.test(planner));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n=== SCENARIO 8: no user refs => no block at all ===');
+{
+  const prompt = builder.buildFinalPrompt({ prompt: 'plain brief' }, [], 'gemini');
+  check('no user-reference block', !prompt.includes('### USER REFERENCE IMAGES'));
+  check('no client instruction leak', !/CLIENT INSTRUCTION/.test(prompt));
+}
+
+// ---------------------------------------------------------------------------
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}\n`);
 process.exit(failures === 0 ? 0 : 1);

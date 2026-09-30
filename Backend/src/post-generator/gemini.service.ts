@@ -20,6 +20,16 @@ export interface GeneratePostImageParams {
   images?: Array<{ base64: string; mimeType?: string }>;
   /** Optional human model reference image (base64) */
   modelImage?: { base64: string; mimeType?: string };
+  /**
+   * User-supplied style references (screenshots, moodboards, "make it look like
+   * this" examples). Each may carry an optional note explaining what the user
+   * wants taken from it.
+   */
+  inspirationImages?: Array<{
+    base64: string;
+    mimeType?: string;
+    note?: string;
+  }>;
   /** Optional company logo image, base64. */
   logoBase64?: string;
   /** MIME type of the logo image; defaults to image/png. */
@@ -774,6 +784,27 @@ export class GeminiService {
           data: params.logoBase64,
         },
       });
+    }
+
+    // 3b. USER-SUPPLIED STYLE REFERENCES (screenshots / moodboards).
+    // Attached before the RAG anchors because explicit user intent must
+    // outweigh automatically-retrieved inspiration. Capped so a large upload
+    // cannot blow the model's attention budget.
+    if (params.inspirationImages && params.inspirationImages.length > 0) {
+      const maxInspiration = Math.max(
+        0,
+        Math.min(4, Number(process.env.GEMINI_MAX_USER_REFS ?? 3)),
+      );
+      for (const insp of params.inspirationImages.slice(0, maxInspiration)) {
+        if (insp.base64) {
+          contents.push({
+            inlineData: {
+              mimeType: insp.mimeType || 'image/png',
+              data: insp.base64,
+            },
+          });
+        }
+      }
     }
 
     // 4. RAG-retrieved style reference images (visual anchors from the library)

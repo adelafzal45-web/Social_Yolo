@@ -416,4 +416,17 @@ export class GeneratePostDto {
   })
   @IsOptional()
   contactPlacement?: string;
+
+  @ApiProperty({
+    required: false,
+    type: String,
+    description:
+      'JSON array of OPTIONAL per-image notes for the uploaded user reference ' +
+      'images, index-aligned with the `refImage` files.',
+    example: '["match this colour grade", ""]',
+  })
+  @IsString()
+  @MaxLength(4000)
+  @IsOptional()
+  referenceNotes?: string;
 }

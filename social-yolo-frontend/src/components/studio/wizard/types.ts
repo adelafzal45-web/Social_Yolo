@@ -1,4 +1,9 @@
-import { BrandProfile, OnImageTextPlacement, Post } from '@/lib/types';
+import {
+  BrandProfile,
+  OnImageTextPlacement,
+  Post,
+  UserReferenceImage,
+} from '@/lib/types';
 
 export interface WizardBrandData {
   brandProfileId?: string;
@@ -55,6 +60,11 @@ export interface WizardFormData {
   onImageText: string;
   onImageTextFont: string;
   onImageTextPlacement: OnImageTextPlacement;
+  /**
+   * User reference screenshots / moodboards with optional per-image notes.
+   * These are the highest-priority creative direction on the request.
+   */
+  referenceImages: UserReferenceImage[];
   // Step 4: Audience
   audiences: string[];
   customAudience: string;

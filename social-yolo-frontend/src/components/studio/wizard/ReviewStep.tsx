@@ -134,14 +134,15 @@ export function ReviewStep({
     },
     {
       step: 3,
-      title: 'Post Idea',
+      title: 'Your Post',
       icon: FileText,
-      value: formData.idea || 'No topic description specified',
+      value:
+        formData.onImageText?.trim() || 'No post message specified yet',
       isQuote: true,
       extra: (
         <div className="mt-2 flex flex-col gap-1.5">
           <div className="text-[11px] font-bold text-slate-400 uppercase">
-            Text on the image
+            How it&apos;s set
           </div>
           {formData.onImageText?.trim() ? (
             <div className="flex items-center gap-2 flex-wrap">
@@ -160,8 +161,36 @@ export function ReviewStep({
           ) : (
             <span className="text-[11px] text-slate-500 dark:text-slate-400 inline-flex items-center gap-1.5">
               <EyeOff className="w-3.5 h-3.5" />
-              None — the image will be generated with no text on it.
+              No message yet — the image will be generated with no text on it.
             </span>
+          )}
+          {/* User reference screenshots and their optional instructions */}
+          {formData.referenceImages?.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="text-[11px] font-bold text-slate-400 uppercase mb-1.5">
+                Reference images ({formData.referenceImages.length})
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {formData.referenceImages.map((r, i) => (
+                  <div key={r.id} className="flex items-start gap-2">
+                    <img
+                      src={r.previewUrl}
+                      alt={`Reference ${i + 1}`}
+                      className="w-7 h-7 rounded border border-slate-200 dark:border-slate-700 object-cover flex-shrink-0"
+                    />
+                    <span className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug min-w-0">
+                      {r.note?.trim() ? (
+                        <>“{r.note}”</>
+                      ) : (
+                        <span className="text-slate-400 italic">
+                          Style reference only (no note)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       ),
