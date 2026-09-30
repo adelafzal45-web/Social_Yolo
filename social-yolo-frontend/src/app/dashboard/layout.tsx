@@ -12,6 +12,9 @@ import {
   CreditCard,
   Settings,
   ShieldAlert,
+  BookOpen,
+  Database,
+  FlaskConical,
   LogOut,
   Bell,
   Menu,
@@ -44,6 +47,7 @@ const navItems: NavItem[] = [
   { label: 'Creations', href: '/dashboard/gallery', icon: ImageIcon },
   { label: 'Favorites', href: '/dashboard/favorites', icon: Star },
   { label: 'Brand DNA', href: '/dashboard/brands', icon: Palette },
+  { label: 'Style References', href: '/dashboard/references', icon: BookOpen },
   { label: 'Billing & Credits', href: '/dashboard/billing', icon: CreditCard },
   { label: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
@@ -438,15 +442,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   Management
                 </div>
                 <Link
+                  href="/admin/prompt-lab"
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
+                    pathname === '/admin/prompt-lab'
+                      ? 'bg-amber-600 text-white'
+                      : 'text-amber-600 dark:text-amber-400/80 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-slate-100 dark:hover:bg-slate-900/80'
+                  }`}
+                >
+                  <FlaskConical className="w-4 h-4" />
+                  <span>Prompt Lab</span>
+                </Link>
+                <Link
+                  href="/admin/knowledge"
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
+                    pathname === '/admin/knowledge'
+                      ? 'bg-amber-600 text-white'
+                      : 'text-amber-600 dark:text-amber-400/80 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-slate-100 dark:hover:bg-slate-900/80'
+                  }`}
+                >
+                  <Database className="w-4 h-4" />
+                  <span>Knowledge Base</span>
+                </Link>
+                <Link
                   href="/admin/users"
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
-                    pathname.startsWith('/admin')
+                    pathname.startsWith('/admin/users')
                       ? 'bg-amber-600 text-white'
                       : 'text-amber-600 dark:text-amber-400/80 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-slate-100 dark:hover:bg-slate-900/80'
                   }`}
                 >
                   <ShieldAlert className="w-4 h-4" />
-                  <span>Admin Panel</span>
+                  <span>User Management</span>
                 </Link>
               </div>
             )}

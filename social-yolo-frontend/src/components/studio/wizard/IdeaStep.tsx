@@ -2,11 +2,21 @@
 
 import React from 'react';
 import { FileText, Sparkles, Lightbulb } from 'lucide-react';
+import { OnImageTextPanel } from './OnImageTextPanel';
+import { OnImageTextPlacement } from '@/lib/types';
 
 interface IdeaStepProps {
   idea: string;
   onChangeIdea: (val: string) => void;
   postTypeLabel?: string;
+  // On-image text overlay (optional)
+  onImageText: string;
+  onChangeOnImageText: (val: string) => void;
+  onImageTextFont: string;
+  onChangeOnImageTextFont: (val: string) => void;
+  onImageTextPlacement: OnImageTextPlacement;
+  onChangeOnImageTextPlacement: (val: OnImageTextPlacement) => void;
+  brandFont?: string;
 }
 
 const INSPIRATION_PILLS = [
@@ -22,6 +32,13 @@ export function IdeaStep({
   idea,
   onChangeIdea,
   postTypeLabel,
+  onImageText,
+  onChangeOnImageText,
+  onImageTextFont,
+  onChangeOnImageTextFont,
+  onImageTextPlacement,
+  onChangeOnImageTextPlacement,
+  brandFont,
 }: IdeaStepProps) {
   return (
     <div className="space-y-8 animate-fadeIn max-w-2xl mx-auto">
@@ -65,10 +82,22 @@ export function IdeaStep({
           <Lightbulb className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
           <p>
             <strong className="text-slate-800 dark:text-slate-200">Don’t worry about the wording.</strong>{' '}
-            Social Yolo will turn your idea into a polished post with headline, body copy, and persuasive call-to-action.
+            Social Yolo turns your idea into a polished post with headline, body
+            copy, and a persuasive call-to-action for your caption.
           </p>
         </div>
       </div>
+
+      {/* Optional: the exact text to print ON the artwork */}
+      <OnImageTextPanel
+        value={onImageText}
+        onChange={onChangeOnImageText}
+        font={onImageTextFont}
+        onChangeFont={onChangeOnImageTextFont}
+        placement={onImageTextPlacement}
+        onChangePlacement={onChangeOnImageTextPlacement}
+        brandFont={brandFont}
+      />
 
       {/* Quick Inspiration Pills */}
       <div className="space-y-2.5 pt-2">

@@ -20,8 +20,10 @@ import {
   ratePost,
   toggleFavoritePost,
   extractBrandFromUrlApi,
+  editPostImage,
+  approvePost,
 } from '@/lib/api';
-import { BrandProfile } from '@/lib/types';
+import { BrandProfile, OnImageTextPlacement } from '@/lib/types';
 
 // Wizard Step Components
 import { StepIndicator } from './wizard/StepIndicator';
@@ -72,10 +74,23 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
       tone: 'Luxury & Elegant',
       logoFile: null,
       logoUrl: null,
+      logoRemoteUrl: null,
+      logoSource: null,
+      logoReady: false,
+      logoPrompted: false,
+      showLogoOnImage: true,
+      contactEmail: '',
+      contactPhone: '',
+      showContactOnImage: false,
+      contactPlacement: 'auto' as OnImageTextPlacement,
     },
     postType: 'promotional',
     customPostType: '',
     idea: initialPrompt || '',
+    // The only text that is ever rendered on the artwork. Empty = letter-free.
+    onImageText: '',
+    onImageTextFont: 'Bold Condensed Sans',
+    onImageTextPlacement: 'auto' as OnImageTextPlacement,
     audiences: ['Customers'],
     customAudience: '',
     style: 'luxury',
@@ -104,6 +119,8 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
 
   // Result state
   const [generatedPost, setGeneratedPost] = useState<FinalPostResult | null>(null);
+  // True while a Gemini image-edit pass is running.
+  const [isEditingImage, setIsEditingImage] = useState<boolean>(false);
 
   const userCredits = user?.credits ?? 50;
 
@@ -163,7 +180,14 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
                 fontHeading: b.fontHeading || prev.brand.fontHeading,
                 fontBody: b.fontBody || prev.brand.fontBody,
                 tone: b.tone || prev.brand.tone,
-                logoUrl: b.logoUrl || prev.brand.logoUrl,
+                logoUrl: b.logoDataUrl || b.logoUrl || prev.brand.logoUrl,
+                logoRemoteUrl: b.logoUrl || null,
+                logoSource: b.logoSource || null,
+                logoReady: Boolean(b.logoReady && b.logoDataUrl),
+                logoPrompted: true,
+                showLogoOnImage: Boolean(b.logoReady),
+                contactEmail: b.contactEmail || prev.brand.contactEmail,
+                contactPhone: b.contactPhone || prev.brand.contactPhone,
               },
             }));
             toast.success(`Brand identity loaded for ${b.brandName || qUrl}!`, 'Brand DNA Ready');
@@ -400,7 +424,10 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         occasion: postTypeLabel,
         backgroundMode: formData.backgroundMode,
         targetAudience: audienceString,
-        keyMessage: formData.idea,
+        // NOTE: the idea is deliberately NOT sent as keyMessage. That field used
+        // to be marked "MUST appear verbatim" in the prompt, which is what made
+        // the user's own prompt get printed on the creative. Only the explicit
+        // onImageText below is ever rendered.
         tone: formData.brand.tone || formData.style,
         fontHeading: formData.brand.fontHeading || undefined,
         fontBody: formData.brand.fontBody || undefined,
@@ -412,10 +439,35 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         niche: formData.brand.niche || undefined,
         layoutPreference: formData.visualDirection,
         variationsCount: formData.variationsCount,
+        // On-image text overlay (optional; empty = no lettering at all)
+        onImageText: formData.onImageText.trim() || undefined,
+        onImageTextFont: formData.onImageText.trim()
+          ? formData.onImageTextFont
+          : undefined,
+        onImageTextPlacement: formData.onImageText.trim()
+          ? formData.onImageTextPlacement
+          : undefined,
         file: heroSubjectFile,
         files: productFilesList.length > 0 ? productFilesList : (formData.productFile ? [formData.productFile] : null),
         model: formData.modelFile || null,
-        logo: formData.brand.logoFile || null,
+        // Logo: the uploaded File when present, otherwise the remote URL the
+        // backend scraped from the brand's website (it downloads and verifies
+        // it server-side). `showLogo` is the user's explicit opt-out.
+        logo: formData.brand.showLogoOnImage ? formData.brand.logoFile || null : null,
+        logoUrl:
+          formData.brand.showLogoOnImage
+            ? formData.brand.logoRemoteUrl || undefined
+            : undefined,
+        showLogo: formData.brand.showLogoOnImage !== false,
+        // Contact line, typeset on the creative only when the user asked for it.
+        showContact: Boolean(
+          formData.brand.showContactOnImage &&
+            ((formData.brand.contactEmail || '').trim() ||
+              (formData.brand.contactPhone || '').trim()),
+        ),
+        contactEmail: formData.brand.contactEmail?.trim() || undefined,
+        contactPhone: formData.brand.contactPhone?.trim() || undefined,
+        contactPlacement: formData.brand.contactPlacement || 'auto',
         additionalInstructions: [
           formData.brand.description ? `Brand Context: ${formData.brand.description}` : '',
           formData.brand.tagline ? `Tagline: ${formData.brand.tagline}` : '',
@@ -454,6 +506,9 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
             cta: v.cta || 'Shop Now',
             rating: v.rating || null,
             isFavorite: v.isFavorite || false,
+            isApproved: v.isApproved || false,
+            editCount: v.editCount || 0,
+            parentPostId: v.parentPostId || null,
           }))
         : undefined;
 
@@ -471,6 +526,9 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
         cta: creativePost.cta || 'Shop Now',
         rating: creativePost.rating || null,
         isFavorite: creativePost.isFavorite || false,
+        isApproved: creativePost.isApproved || false,
+        editCount: creativePost.editCount || 0,
+        parentPostId: creativePost.parentPostId || null,
         variants: mappedVariants,
       };
 
@@ -562,6 +620,9 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
     setFormData((prev) => ({
       ...prev,
       idea: '',
+      onImageText: '',
+      onImageTextFont: 'Bold Condensed Sans',
+      onImageTextPlacement: 'auto',
       productFile: null,
       rawOriginalUrl: null,
       cutoutUrl: null,
@@ -580,6 +641,92 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
   const handleResizeAndRegenerate = (newRatio: string) => {
     setFormData((prev) => ({ ...prev, aspectRatio: newRatio }));
     handleGenerate();
+  };
+
+  /**
+   * IMAGE EDITING.
+   *
+   * Sends the user's change request to the backend together with the already
+   * generated creative; Gemini returns a revised image which replaces the
+   * current one on screen. The original is kept server-side as the parent.
+   */
+  const handleEditImage = async (
+    postId: string,
+    instructions: string,
+  ): Promise<void> => {
+    setIsEditingImage(true);
+    setGenerationError(null);
+    try {
+      const edited = await editPostImage(postId, instructions);
+
+      const editedResult: FinalPostResult = {
+        id: edited.id,
+        postId: edited.id,
+        platform: edited.platform || formData.platform,
+        aspectRatio: edited.aspectRatio || formData.aspectRatio,
+        imageUrl: edited.imageUrl || '',
+        headline: edited.headline || generatedPost?.headline || 'Your Creative',
+        bodyCopy: edited.bodyCopy || generatedPost?.bodyCopy || '',
+        cta: edited.cta || generatedPost?.cta || 'Shop Now',
+        rating: edited.rating ?? null,
+        isFavorite: edited.isFavorite ?? false,
+        isApproved: edited.isApproved ?? false,
+        editCount: edited.editCount ?? 1,
+        parentPostId: edited.parentPostId ?? postId,
+      };
+
+      setGeneratedPost(editedResult);
+      refreshUser();
+      refreshNotifications();
+      toast.success(
+        'Your changes were applied to the image!',
+        'Creative Updated',
+      );
+    } catch (err: any) {
+      console.error('Image edit failed:', err);
+      const msg = err?.message || 'Could not apply those changes.';
+      toast.error(msg, 'Edit Failed');
+    } finally {
+      setIsEditingImage(false);
+    }
+  };
+
+  /**
+   * APPROVE → VECTOR KNOWLEDGE BASE.
+   *
+   * Marks the creative as approved so it is embedded and promoted into the RAG
+   * knowledge base, where it becomes a style reference for future generations.
+   */
+  const handleApprovePost = async (
+    postId: string,
+    approved: boolean,
+  ): Promise<void> => {
+    try {
+      const updated = await approvePost(postId, approved);
+      setGeneratedPost((prev) => {
+        if (!prev) return prev;
+        const applyFlag = (v: FinalPostResult): FinalPostResult =>
+          v.postId === postId || v.id === postId
+            ? { ...v, isApproved: updated.isApproved ?? approved }
+            : v;
+        return {
+          ...applyFlag(prev),
+          variants: prev.variants?.map(applyFlag),
+        };
+      });
+      toast.success(
+        approved
+          ? 'Saved to your style library — future posts will learn from it!'
+          : 'Removed from your style library.',
+        approved ? 'Approved' : 'Approval Removed',
+      );
+    } catch (err: any) {
+      console.error('Approval failed:', err);
+      toast.error(
+        err?.message || 'Could not update approval.',
+        'Approval Failed',
+      );
+    }
   };
 
   return (
@@ -652,6 +799,22 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
                 onChangeIdea={(val) =>
                   setFormData((prev) => ({ ...prev, idea: val }))
                 }
+                onImageText={formData.onImageText}
+                onChangeOnImageText={(val) =>
+                  setFormData((prev) => ({ ...prev, onImageText: val }))
+                }
+                onImageTextFont={formData.onImageTextFont}
+                onChangeOnImageTextFont={(val) =>
+                  setFormData((prev) => ({ ...prev, onImageTextFont: val }))
+                }
+                onImageTextPlacement={formData.onImageTextPlacement}
+                onChangeOnImageTextPlacement={(val) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    onImageTextPlacement: val,
+                  }))
+                }
+                brandFont={formData.brand.fontHeading || undefined}
               />
             )}
 
@@ -803,6 +966,9 @@ export function PostGenerator({ initialPrompt = '', onPostGenerated }: PostGener
             onCreateAnother={handleCreateAnother}
             onChangeStyle={handleChangeStyleAndRegenerate}
             onResize={handleResizeAndRegenerate}
+            onEditImage={handleEditImage}
+            isEditingImage={isEditingImage}
+            onApprovePost={handleApprovePost}
           />
         )}
       </div>

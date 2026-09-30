@@ -19,6 +19,8 @@ import {
   PlusCircle,
   Layers,
   CheckCircle2,
+  Wand2,
+  Library,
 } from 'lucide-react';
 import { StarsRating } from '@/components/ui/StarsRating';
 import { FinalPostResult } from './types';
@@ -34,6 +36,12 @@ interface PostResultProps {
   onCreateAnother: () => void;
   onChangeStyle?: (newStyle: string) => void;
   onResize?: (newRatio: string) => void;
+  /** Sends natural-language change requests to Gemini together with the image. */
+  onEditImage?: (postId: string, instructions: string) => Promise<void>;
+  /** True while an edit pass is in flight. */
+  isEditingImage?: boolean;
+  /** Approves the creative so it is stored in the vector knowledge base. */
+  onApprovePost?: (postId: string, approved: boolean) => Promise<void>;
 }
 
 export function PostResult({
@@ -45,12 +53,18 @@ export function PostResult({
   onCreateAnother,
   onChangeStyle,
   onResize,
+  onEditImage,
+  isEditingImage = false,
+  onApprovePost,
 }: PostResultProps) {
   const { toast } = useNotification();
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [showEditCopyModal, setShowEditCopyModal] = useState(false);
   const [showStyleModal, setShowStyleModal] = useState(false);
   const [showResizeModal, setShowResizeModal] = useState(false);
+  const [showEditImageModal, setShowEditImageModal] = useState(false);
+  const [editInstructions, setEditInstructions] = useState('');
+  const [isApproving, setIsApproving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isCopiedText, setIsCopiedText] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
@@ -156,6 +170,31 @@ export function PostResult({
     onUpdatePostCopy(currentPost.postId, headlineEdit, bodyCopyEdit, ctaEdit);
     setShowEditCopyModal(false);
     toast.success('Post copy updated successfully!', 'Copy Saved');
+  };
+
+  // Apply natural-language edits to the generated image
+  const handleSubmitEditImage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onEditImage) return;
+    const instructions = editInstructions.trim();
+    if (instructions.length < 3) {
+      toast.error('Describe the changes you want to make.', 'Edit Request');
+      return;
+    }
+    setShowEditImageModal(false);
+    setEditInstructions('');
+    await onEditImage(currentPost.postId, instructions);
+  };
+
+  // Approve → vector knowledge base
+  const handleToggleApprove = async () => {
+    if (!onApprovePost) return;
+    setIsApproving(true);
+    try {
+      await onApprovePost(currentPost.postId, !currentPost.isApproved);
+    } finally {
+      setIsApproving(false);
+    }
   };
 
   return (
@@ -419,6 +458,57 @@ export function PostResult({
                 <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <span>Resize Ratio</span>
               </button>
+
+              {/* Edit Image with AI (full width) */}
+              {onEditImage && (
+                <button
+                  type="button"
+                  onClick={() => setShowEditImageModal(true)}
+                  disabled={isEditingImage}
+                  className="col-span-2 flex items-center gap-2.5 p-3 rounded-xl border border-brand-300 dark:border-brand-700 bg-brand-50 dark:bg-brand-950/40 hover:bg-brand-100 dark:hover:bg-brand-900/50 text-brand-700 dark:text-brand-300 text-xs font-bold transition shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isEditingImage ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="w-4 h-4" />
+                  )}
+                  <span>
+                    {isEditingImage
+                      ? 'Applying your changes…'
+                      : 'Edit This Image with AI'}
+                  </span>
+                </button>
+              )}
+
+              {/* Approve → knowledge base (full width) */}
+              {onApprovePost && (
+                <button
+                  type="button"
+                  onClick={handleToggleApprove}
+                  disabled={isApproving}
+                  className={`col-span-2 flex items-center gap-2.5 p-3 rounded-xl border text-xs font-bold transition shadow-sm disabled:opacity-60 disabled:cursor-not-allowed ${
+                    currentPost.isApproved
+                      ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-500 hover:bg-emerald-50/40 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {currentPost.isApproved ? (
+                    <CheckCircle2 className="w-4 h-4" />
+                  ) : (
+                    <Library className="w-4 h-4" />
+                  )}
+                  <span className="text-left flex-1">
+                    {currentPost.isApproved
+                      ? 'Approved — saved to your style library'
+                      : 'Approve & save to style library'}
+                  </span>
+                  {currentPost.isApproved && (
+                    <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      Click to undo
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -680,6 +770,98 @@ export function PostResult({
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* MODAL 4: Edit Image with AI */}
+      {showEditImageModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSubmitEditImage}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4 animate-scaleUp"
+          >
+            <div className="flex items-center justify-between border-b pb-3 border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-300 flex items-center justify-center">
+                  <Wand2 className="w-4 h-4" />
+                </div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                  Edit This Image
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditImageModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Tell us what to change. Your request is sent to Gemini together
+              with this image, and only the things you mention are altered —
+              everything else stays exactly the same.
+            </p>
+
+            <textarea
+              value={editInstructions}
+              onChange={(e) => setEditInstructions(e.target.value.slice(0, 600))}
+              rows={4}
+              autoFocus
+              placeholder="e.g. Make the background warmer and darker, and move the product slightly to the right"
+              className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 px-3.5 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 resize-none placeholder:text-slate-400 dark:placeholder:text-slate-600"
+            />
+
+            {/* Quick suggestions */}
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                'Warmer, darker background',
+                'Brighter and more premium',
+                'Remove all text from the image',
+                'Zoom in on the product',
+                'Change the colour to brand purple',
+              ].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setEditInstructions(s)}
+                  className="text-[11px] px-2.5 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] text-slate-400">
+                {editInstructions.length}/600
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditImageModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editInstructions.trim().length < 3 || isEditingImage}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-brand-500/25 transition disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  {isEditingImage ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Wand2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {isEditingImage ? 'Applying…' : 'Apply Changes'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
       )}
 

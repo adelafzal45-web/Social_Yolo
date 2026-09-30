@@ -2,6 +2,7 @@ import {
   AuthResponse,
   BillingSummary,
   BrandProfile,
+  CreateStyleReferenceInput,
   ExtractedBrandData,
   GeneratePostResponse,
   GuidedPostInput,
@@ -9,8 +10,12 @@ import {
   NotificationItem,
   Post,
   ProductAnalysisResult,
+  PromptPreviewResponse,
+  RagCorpusStats,
   RemoveBackgroundOptions,
   RemoveBackgroundResponse,
+  StyleReference,
+  StyleReferenceListResponse,
   User,
   UserRole,
 } from './types';
@@ -501,6 +506,81 @@ export async function ratePost(
   };
 }
 
+/* ================= IMAGE EDITING & APPROVAL ================= */
+
+/**
+ * IMAGE EDITING.
+ *
+ * Sends the user's natural-language change request to the backend, which
+ * combines it with the existing creative and asks Gemini for a revised image
+ * (the image itself is already stored server-side, so nothing is re-uploaded).
+ * Returns the new post, linked to its parent via `parentPostId`.
+ */
+export async function editPostImage(
+  postId: string,
+  instructions: string,
+): Promise<Post> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/posts/${postId}/edit`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ instructions }),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/posts/${postId}/edit`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ instructions }),
+    });
+  }
+
+  const data = await handleApiResponse(res, 'Failed to apply the edit');
+  return {
+    ...data,
+    imageUrl: resolveImageUrl(data.imageUrl),
+    originalImageUrl: resolveImageUrl(data.originalImageUrl),
+  };
+}
+
+/**
+ * APPROVE → VECTOR KNOWLEDGE BASE.
+ *
+ * Marks the creative as approved, which embeds it and promotes it into the RAG
+ * knowledge base so it is retrieved as a style reference on future generations.
+ * Pass `false` to withdraw approval and remove it from the pool.
+ */
+export async function approvePost(
+  postId: string,
+  approved = true,
+): Promise<Post> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/posts/${postId}/approve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ approved }),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/posts/${postId}/approve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ approved }),
+    });
+  }
+
+  const data = await handleApiResponse(res, 'Failed to update approval');
+  return {
+    ...data,
+    imageUrl: resolveImageUrl(data.imageUrl),
+    originalImageUrl: resolveImageUrl(data.originalImageUrl),
+  };
+}
+
 /* ================= GUIDED CREATOR & PRODUCT SCANNER ================= */
 
 export async function createGuidedPost(input: GuidedPostInput): Promise<Post> {
@@ -541,6 +621,20 @@ export async function createGuidedPost(input: GuidedPostInput): Promise<Post> {
   } else if (input.totalVariations) {
     fd.append('totalVariations', String(input.totalVariations));
   }
+  // On-image text overlay. When empty, the backend renders a letter-free image.
+  if (input.onImageText) fd.append('onImageText', input.onImageText);
+  if (input.onImageTextFont) fd.append('onImageTextFont', input.onImageTextFont);
+  if (input.onImageTextPlacement) {
+    fd.append('onImageTextPlacement', input.onImageTextPlacement);
+  }
+  if (input.onImageTextColor) fd.append('onImageTextColor', input.onImageTextColor);
+  // Brand logo + contact details
+  if (input.showLogo !== undefined) fd.append('showLogo', String(input.showLogo));
+  if (input.logoUrl) fd.append('logoUrl', input.logoUrl);
+  if (input.showContact !== undefined) fd.append('showContact', String(input.showContact));
+  if (input.contactEmail) fd.append('contactEmail', input.contactEmail);
+  if (input.contactPhone) fd.append('contactPhone', input.contactPhone);
+  if (input.contactPlacement) fd.append('contactPlacement', input.contactPlacement);
   if (input.files && input.files.length > 0) {
     for (const f of input.files) {
       fd.append('files', f, f.name);
@@ -975,4 +1069,207 @@ export async function clearAllNotificationsApi(): Promise<void> {
   }
 }
 
+
+
+/* ================= STYLE REFERENCE LIBRARY / RAG ================= */
+
+/**
+ * Uploads a reference image to the Style Reference Library.
+ *
+ * The backend runs Gemini Vision over the picture to write its design
+ * language in words, embeds it, and makes it retrievable for the very next
+ * generation. `makeGlobal` is honoured only for admins.
+ */
+export async function createStyleReferenceApi(
+  input: CreateStyleReferenceInput,
+): Promise<StyleReference> {
+  const fd = new FormData();
+  fd.append('file', input.file);
+  if (input.title) fd.append('title', input.title);
+  if (input.notes) fd.append('notes', input.notes);
+  if (input.category) fd.append('category', input.category);
+  if (input.tags) fd.append('tags', input.tags);
+  if (input.hint) fd.append('hint', input.hint);
+  if (input.makeGlobal) fd.append('makeGlobal', 'true');
+
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/style-references', { method: 'POST', headers, body: fd });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references`, {
+      method: 'POST',
+      headers,
+      body: fd,
+    });
+  }
+
+  return handleApiResponse(res, 'Failed to upload the style reference');
+}
+
+export async function getStyleReferencesApi(
+  params: { scope?: 'all' | 'global' | 'mine'; category?: string; search?: string } = {},
+): Promise<StyleReferenceListResponse> {
+  const qs = new URLSearchParams();
+  if (params.scope) qs.set('scope', params.scope);
+  if (params.category) qs.set('category', params.category);
+  if (params.search) qs.set('search', params.search);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/style-references${suffix}`, { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references${suffix}`, {
+      headers,
+      cache: 'no-store',
+    });
+  }
+
+  return handleApiResponse(res, 'Failed to load style references');
+}
+
+export async function getRagStatsApi(): Promise<RagCorpusStats> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/style-references/stats', { headers, cache: 'no-store' });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references/stats`, {
+      headers,
+      cache: 'no-store',
+    });
+  }
+  return handleApiResponse(res, 'Failed to load RAG statistics');
+}
+
+
+export async function updateStyleReferenceApi(
+  id: string,
+  patch: { title?: string; notes?: string; category?: string; tags?: string; isActive?: string },
+): Promise<StyleReference> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/style-references/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(patch),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references/${id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(patch),
+    });
+  }
+  return handleApiResponse(res, 'Failed to update the style reference');
+}
+
+export async function deleteStyleReferenceApi(id: string): Promise<void> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/style-references/${id}`, { method: 'DELETE', headers });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || 'Failed to delete the style reference');
+  }
+}
+
+/** Admin-only: promote/demote an entry between the global pool and private. */
+export async function setStyleReferenceScopeApi(
+  id: string,
+  makeGlobal: boolean,
+): Promise<StyleReference> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/style-references/${id}/scope`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ makeGlobal }),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references/${id}/scope`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ makeGlobal }),
+    });
+  }
+  return handleApiResponse(res, 'Failed to change the reference scope');
+}
+
+/**
+ * Admin-only: seeds the built-in curated global knowledge base.
+ * This is the UI replacement for `node scripts/seed-sample-posts.cjs`.
+ */
+export async function seedStarterLibraryApi(): Promise<{
+  created: number;
+  skipped: number;
+  failed: number;
+}> {
+  const headers = getAuthHeaders();
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/style-references/seed-starter-library', { method: 'POST', headers });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references/seed-starter-library`, {
+      method: 'POST',
+      headers,
+    });
+  }
+  return handleApiResponse(res, 'Failed to seed the starter library');
+}
+
+/** Admin-only: recomputes embeddings for entries that have none. */
+export async function reindexStyleReferencesApi(force = false): Promise<{
+  processed: number;
+  failed: number;
+}> {
+  const headers = getAuthHeaders();
+  const suffix = force ? '?force=true' : '';
+  let res: Response;
+  try {
+    res = await fetch(`/api/proxy/style-references/reindex${suffix}`, { method: 'POST', headers });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/style-references/reindex${suffix}`, {
+      method: 'POST',
+      headers,
+    });
+  }
+  return handleApiResponse(res, 'Failed to reindex the knowledge base');
+}
+
+/**
+ * PROMPT LAB — returns the exact Stage-1 and Stage-2 prompts plus the RAG
+ * retrieval trace for a brief, without generating an image or spending credit.
+ */
+export async function previewPromptApi(
+  brief: Partial<GuidedPostInput>,
+): Promise<PromptPreviewResponse> {
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  let res: Response;
+  try {
+    res = await fetch('/api/proxy/posts/preview-prompt', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(brief),
+    });
+  } catch {
+    res = await fetch(`${getDirectBackendOrigin()}/api/posts/preview-prompt`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(brief),
+    });
+  }
+  return handleApiResponse(res, 'Failed to preview the prompt');
+}
 

@@ -14,6 +14,9 @@ import {
   Image as ImageIcon,
   Zap,
   Copy,
+  Type,
+  EyeOff,
+  Phone,
 } from 'lucide-react';
 import { WizardFormData } from './types';
 import { POST_TYPES } from './PostTypeStep';
@@ -60,6 +63,18 @@ export function ReviewStep({
         (formData.customAudience ? `, ${formData.customAudience}` : '')
       : formData.customAudience || 'General Audience';
 
+  // Mirrors exactly what the backend will typeset as the [C1] contact line.
+  const contactLine =
+    formData.brand.showContactOnImage &&
+    ((formData.brand.contactEmail || '').trim() || (formData.brand.contactPhone || '').trim())
+      ? [
+          (formData.brand.contactPhone || '').trim(),
+          (formData.brand.contactEmail || '').trim(),
+        ]
+          .filter(Boolean)
+          .join('  ·  ')
+      : '';
+
   const reviewItems = [
     {
       step: 1,
@@ -67,21 +82,47 @@ export function ReviewStep({
       icon: Globe,
       value: formData.brand.brandName || 'Default Brand',
       extra: (
-        <div className="flex items-center gap-2 mt-1">
-          {formData.brand.logoUrl && (
-            <img
-              src={formData.brand.logoUrl}
-              alt="Logo"
-              className="w-4 h-4 rounded object-contain"
+        <div className="flex flex-col gap-2 mt-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            {formData.brand.logoUrl && (
+              <img
+                src={formData.brand.logoUrl}
+                alt="Logo"
+                className="w-4 h-4 rounded object-contain"
+              />
+            )}
+            <span
+              className="w-3 h-3 rounded-full border border-black/10 inline-block"
+              style={{ backgroundColor: formData.brand.primaryColor || '#7c5cff' }}
             />
-          )}
-          <span
-            className="w-3 h-3 rounded-full border border-black/10 inline-block"
-            style={{ backgroundColor: formData.brand.primaryColor || '#7c5cff' }}
-          />
-          <span className="text-[11px] text-slate-500 font-mono">
-            {formData.brand.fontHeading || 'Playfair Display'}
-          </span>
+            <span className="text-[11px] text-slate-500 font-mono">
+              {formData.brand.fontHeading || 'Playfair Display'}
+            </span>
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+                formData.brand.showLogoOnImage
+                  ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                  : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {formData.brand.showLogoOnImage ? 'Logo on image' : 'No logo'}
+            </span>
+          </div>
+
+          {/* Contact line status — mirrors exactly what gets typeset. */}
+          {contactLine ? (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-brand-300 text-[10px] font-bold border border-brand-200 dark:border-brand-800/60">
+                <Phone className="w-3 h-3" />
+                {contactLine}
+              </span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                {formData.brand.contactPlacement === 'auto'
+                  ? 'AI decides placement'
+                  : formData.brand.contactPlacement?.replace(/_/g, ' ')}
+              </span>
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -97,6 +138,33 @@ export function ReviewStep({
       icon: FileText,
       value: formData.idea || 'No topic description specified',
       isQuote: true,
+      extra: (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <div className="text-[11px] font-bold text-slate-400 uppercase">
+            Text on the image
+          </div>
+          {formData.onImageText?.trim() ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-brand-300 text-xs font-bold border border-brand-200 dark:border-brand-800/60">
+                <Type className="w-3.5 h-3.5" />
+                “{formData.onImageText}”
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                {formData.onImageTextFont}
+                {' · '}
+                {formData.onImageTextPlacement === 'auto'
+                  ? 'AI decides placement'
+                  : formData.onImageTextPlacement.replace(/_/g, ' ')}
+              </span>
+            </div>
+          ) : (
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 inline-flex items-center gap-1.5">
+              <EyeOff className="w-3.5 h-3.5" />
+              None — the image will be generated with no text on it.
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       step: 4,
@@ -276,32 +344,29 @@ export function ReviewStep({
         </div>
       </div>
 
-      {/* Credit balance & Generate CTA box */}
-      <div className="p-6 rounded-3xl bg-gradient-to-br from-brand-900 via-indigo-950 to-slate-950 text-white shadow-xl shadow-brand-900/20 border border-brand-700/40 text-center space-y-4">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-amber-300 text-xs font-semibold">
-            <Zap className="w-3.5 h-3.5 fill-amber-300" />
-            <span>
-              Generation Cost: {(formData.variationsCount || 1) * 5} Credits (Balance: {userCredits} Credits)
-            </span>
-          </div>
-          <h3 className="text-xl font-bold tracking-tight">Ready to bring your post to life?</h3>
-          <p className="text-xs text-slate-300 max-w-md mx-auto">
-            Our multi-agent pipeline will synthesize the art concept, typography, and visual assets in high definition.
-          </p>
-        </div>
-
+      {/* Graceful & UI-friendly Generate CTA */}
+      <div className="pt-4 pb-2 flex flex-col items-center justify-center gap-3">
         <button
           type="button"
           onClick={onGenerate}
           disabled={isGenerating}
-          className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-brand-500 via-indigo-500 to-amber-400 hover:from-brand-400 hover:to-amber-300 text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-brand-500/30 transition-all hover:scale-[1.02] active:scale-[0.98] inline-flex items-center justify-center gap-2"
+          className="group relative inline-flex items-center justify-center gap-3 px-10 py-4 rounded-2xl bg-gradient-to-r from-brand-600 via-indigo-600 to-violet-600 hover:from-brand-500 hover:via-indigo-500 hover:to-violet-500 text-white font-bold text-base shadow-xl shadow-brand-500/25 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
         >
-          <Sparkles className="w-5 h-5 fill-slate-950" />
-          <span>
-            ✨ Generate {(formData.variationsCount || 1) === 1 ? 'My Post' : `${formData.variationsCount} Post Variants`}
-          </span>
+          <Sparkles className="w-5 h-5 text-amber-300 group-hover:rotate-12 transition-transform duration-200" />
+          <span>Generate My Post</span>
+          {Boolean(formData.variationsCount && formData.variationsCount > 1) && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-white">
+              {formData.variationsCount} Variants
+            </span>
+          )}
         </button>
+
+        <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+          <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+          <span>
+            {(formData.variationsCount || 1) * 5} Credits · Balance: {userCredits} Credits
+          </span>
+        </div>
       </div>
     </div>
   );
