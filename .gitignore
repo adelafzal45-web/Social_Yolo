@@ -1,0 +1,33 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# servers.ps1 runtime artifacts
+.run/
+*.log
+
+# Node.js & NestJS Build Artifacts
+node_modules/
+dist/
+npm-debug.log*
+
+# Environment Secrets
+.env
+.env.*
+!.env.example
+
+# Generated User Assets
+Backend/public/generated-posts/*
+!Backend/public/generated-posts/.gitkeep
+Backend/public/uploads/*
+!Backend/public/uploads/.gitkeep
+test_cutout_output.png
+scratch_test_out.png
+*.tmp
+*.zip
+image-service/*.png
+image-service/curl_response.json
+Backend/scripts/*.png
+
